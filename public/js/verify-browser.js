@@ -160,21 +160,21 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
         for (const claim of report.claims) {
           const again = byId.get(claim.id);
           if (!again) {
-            failure = `Claim ${claim.id} was not reproduced by the re-run.`;
+            failure = `Claim ${claim.id} was not reproduced by the rerun.`;
             break;
           }
           if (again.passed !== claim.passed) {
-            failure = `Claim ${claim.id} passed value differs (report: ${claim.passed}, re-run: ${again.passed}).`;
+            failure = `Claim ${claim.id} passed value differs (report: ${claim.passed}, rerun: ${again.passed}).`;
             break;
           }
           if (String(again.threshold) !== String(claim.threshold)) {
-            failure = `Claim ${claim.id} threshold differs (report: ${claim.threshold}, re-run: ${again.threshold}).`;
+            failure = `Claim ${claim.id} threshold differs (report: ${claim.threshold}, rerun: ${again.threshold}).`;
             break;
           }
           // Legacy reports (pre-P3) carry the exact value: it must
           // match too. Predicate reports carry no value.
           if (claim.value !== undefined && String(again.value) !== String(claim.value)) {
-            failure = `Claim ${claim.id} value differs (report: ${claim.value}, re-run: ${again.value}).`;
+            failure = `Claim ${claim.id} value differs (report: ${claim.value}, rerun: ${again.value}).`;
             break;
           }
         }
@@ -193,7 +193,7 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
       }
     }
   } catch (err) {
-    check('claims', false, `Claim re-run failed: ${err.message}`);
+    check('claims', false, `Claim rerun failed: ${err.message}`);
   }
 
   // f. The deterministic score, when present, recomputes exactly.
@@ -224,7 +224,7 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
           JSON.stringify(again.components) === JSON.stringify(report.score.components);
         detail = same
           ? `Score recomputed exactly: ${again.value} (${again.band}).`
-          : `Score differs on re-run (report: ${report.score.value}, re-run: ${again.value}).`;
+          : `Score differs on rerun (report: ${report.score.value}, rerun: ${again.value}).`;
       } else {
         same =
           again.version === report.score.version &&
@@ -232,7 +232,7 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
           JSON.stringify(stripPoints(again.components)) === JSON.stringify(stripPoints(report.score.components));
         detail = same
           ? `Score recomputed from the disclosure snapshot: band ${again.band} (matches the public band).`
-          : `Score band differs on re-run (report band: ${report.score.band}, re-run band: ${again.band}).`;
+          : `Score band differs on rerun (report band: ${report.score.band}, rerun band: ${again.band}).`;
       }
       if (same) {
         check('score', true, detail);
@@ -241,7 +241,7 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
       }
     }
   } catch (err) {
-    check('score', false, `Score re-run failed: ${err.message}`);
+    check('score', false, `Score rerun failed: ${err.message}`);
   }
 
   // g. Every linked wallet proves ownership (transfer or signature).

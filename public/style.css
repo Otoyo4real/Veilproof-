@@ -46,7 +46,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   padding-top: 0.85rem;
   padding-bottom: 0.85rem;
 }
@@ -370,6 +371,10 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; colo
 }
 .site-footer p { margin-bottom: 0.35rem; }
 
+/* ---------- tables ---------- */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 0 1rem; }
+.table-scroll table { margin: 0; }
+
 /* ---------- small screens ---------- */
 @media (max-width: 760px) {
   .hero-grid { grid-template-columns: 1fr; gap: 1.5rem; }
@@ -386,4 +391,13 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; colo
   .site-nav { gap: 0.85rem; }
   .site-nav a { font-size: 0.88rem; }
   .brand .tag { display: none; }
+  /* Hero calls to action stack full-width so they are easy to tap. */
+  .cta-row button, .cta-row .btn { flex: 1 1 100%; margin-right: 0; text-align: center; }
+  /* The "what it proves" table stacks: each row becomes a card with
+     the claim as its heading, so nothing overflows a phone screen. */
+  .proves-table { border: 0; background: transparent; }
+  .proves-table tr:first-child { display: none; }
+  .proves-table tr { display: block; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.9rem 1rem; margin-bottom: 0.75rem; }
+  .proves-table td { display: block; border: 0; padding: 0; }
+  .proves-table td:first-child { white-space: normal; margin-bottom: 0.25rem; }
 }

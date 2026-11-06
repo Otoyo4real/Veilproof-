@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VeilProof — Prove you&rsquo;re good for it, without handing over your wallet</title>
+<title>VeilProof: Prove you&rsquo;re good for it, without handing over your wallet</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,11 +22,11 @@
   <div class="hero-grid">
     <div>
       <p class="eyebrow">NEAR Hackathon 2026 · Privacy &amp; Private AI · Agent Economy</p>
-      <h1>Prove an agent is good for it — without handing over its wallet</h1>
+      <h1>Prove an agent is good for it, without handing over its wallet</h1>
       <p class="lede">Agents are starting to pay each other: compute, invoices,
       OTC deals. Before a deal, the other side wants proof the agent can
-      pay — but publishing a treasury wallet invites targeting, scams and
-      front-running. VeilProof changes the deal. An agent proves its
+      pay, but publishing a treasury wallet invites targeting, scams and
+      front running. VeilProof changes the deal. An agent proves its
       treasury across every wallet it holds, proves the balance was HELD
       and not just deposited an hour ago, and carries a portable credit
       score any app can recompute from the same public rules. The facts
@@ -51,14 +51,14 @@
         <tr><td>Transactions in 30 days</td><td class="mock-pass">Pass</td></tr>
         <tr><td>Credit score</td><td class="mock-pass">solid</td></tr>
       </table>
-      <p class="mock-ai">Underwriting (advisory): <strong>lend_with_limits — suggested limit 5 NEAR</strong> — NEAR AI Cloud, attested</p>
+      <p class="mock-ai">Underwriting (advisory): <strong>lend_with_limits, suggested limit 5 NEAR</strong>, NEAR AI Cloud, attested</p>
       <p class="mock-foot">Anchored on NEAR testnet · tx <span class="mono">3ouNst9D…TW9PQ</span></p>
     </div>
   </div>
 </section>
 
 <section class="section" id="demo" aria-label="Live demo">
-  <h2 class="section-title">See it work — live, on this page</h2>
+  <h2 class="section-title">See it work, live, on this page</h2>
   <p class="section-lede">No account, no wallet, no setup. One click verifies a real claim
   published from the demo wallet against the live NEAR testnet registry.</p>
   <div class="card">
@@ -91,30 +91,30 @@
     <div class="how-item">
       <span class="step-num">2</span>
       <strong>Publish</strong>
-      <span>NEAR AI Cloud analyses the claims in a TEE and attests the result. Only the report hashes go onchain — never the address, never amounts.</span>
+      <span>NEAR AI Cloud analyses the claims in a TEE and attests the result. Only the report hashes go onchain, never the address, never amounts.</span>
     </div>
     <div class="how-item">
       <span class="step-num">3</span>
       <strong>Verify</strong>
-      <span>The verifier re-fetches the chain, re-runs every claim, and gets a clear VALID or INVALID — in one click, with no account and no wallet.</span>
+      <span>The verifier refetches the chain, reruns every claim, and gets a clear VALID or INVALID, in one click, with no account and no wallet.</span>
     </div>
   </div>
 </section>
 
 <section class="section" aria-label="What VeilProof proves">
-  <h2 class="section-title">What it proves — and what it does not</h2>
-  <p class="section-lede">The honest trade-off, stated plainly. VeilProof is a hybrid
+  <h2 class="section-title">What it proves, and what it does not</h2>
+  <p class="section-lede">The honest trade off, stated plainly. VeilProof is a hybrid
   privacy model: the public sees only hashes, the chosen verifier sees the
-  address because they must re-check the chain, and the AI sees claim
-  aggregates only — never the address, never transaction hashes.</p>
+  address because they must recheck the chain, and the AI sees claim
+  aggregates only, never the address, never transaction hashes.</p>
   <table class="proves-table">
     <tr><th>Claim</th><th>What proves it</th></tr>
-    <tr><td>The data is genuine</td><td>The verifier re-fetches it from the chain. Onchain data cannot be typed in by the user.</td></tr>
+    <tr><td>The data is genuine</td><td>The verifier refetches it from the chain. Onchain data cannot be typed in by the user.</td></tr>
     <tr><td>The balance was held, not flashed</td><td>Sampled balance history at past block heights: the lowest sampled balance over the window, not a snapshot.</td></tr>
-    <tr><td>The wallets are all the prover's</td><td>Each linked wallet proves ownership with a transfer to the primary wallet, or by signing a link message with its key — no transfer, no gas.</td></tr>
-    <tr><td>The credit score is real</td><td>The score is deterministic (score-v2, published rules): the verifier recomputes it from the same snapshots and the same windows. A tampered score fails verification.</td></tr>
-    <tr><td>The underwriting opinion is honest</td><td>NEAR AI Cloud TEE attestation, nonce-bound to the request. The verdict is advisory — a thin score can never support a lend, by a deterministic guard.</td></tr>
-    <tr><td>The report was not altered</td><td>SHA-256 report hash anchored on NEAR; tampering fails verification.</td></tr>
+    <tr><td>The wallets are all the prover's</td><td>Each linked wallet proves ownership with a transfer to the primary wallet, or by signing a link message with its key, no transfer, no gas.</td></tr>
+    <tr><td>The credit score is real</td><td>The score is deterministic (score v2, published rules): the verifier recomputes it from the same snapshots and the same windows. A tampered score fails verification.</td></tr>
+    <tr><td>The underwriting opinion is honest</td><td>NEAR AI Cloud TEE attestation, nonce bound to the request. The verdict is advisory, a thin score can never support a lend, by a deterministic guard.</td></tr>
+    <tr><td>The report was not altered</td><td>SHA 256 report hash anchored on NEAR; tampering fails verification.</td></tr>
     <tr><td>The wallet belongs to the prover</td><td>The prover signs a challenge with the wallet key; the publish transaction records the signer as owner.</td></tr>
     <tr><td>The wallet address stays private</td><td>Only a hash commitment is published. The address travels only in the private disclosure package to the verifier the prover chose.</td></tr>
     <tr><td>Anything offchain</td><td>Nothing. VeilProof only ever makes claims about onchain data.</td></tr>
@@ -126,11 +126,11 @@
   <div class="use-grid">
     <div class="use-item">
       <strong>Agent treasuries</strong>
-      <span>An agent proves it can settle a deal — across every wallet it holds, with a sustained balance and a portable score — without publishing the treasury addresses that would invite targeting.</span>
+      <span>An agent proves it can settle a deal, across every wallet it holds, with a sustained balance and a portable score, without publishing the treasury addresses that would invite targeting.</span>
     </div>
     <div class="use-item">
-      <strong>Agent-to-agent credit</strong>
-      <span>A service agent checks a client agent's score and an attested underwriting opinion before extending compute or credit — the score is recomputable, so no one has to trust the claimant.</span>
+      <strong>Agent to agent credit</strong>
+      <span>A service agent checks a client agent's score and an attested underwriting opinion before extending compute or credit, the score is recomputable, so no one has to trust the claimant.</span>
     </div>
     <div class="use-item">
       <strong>Lending</strong>
@@ -138,7 +138,7 @@
     </div>
     <div class="use-item">
       <strong>Grants and OTC deals</strong>
-      <span>A grantee proves onchain activity to a committee, or a counterparty proves it can settle before a deal is struck — the proof, not the address, changes hands.</span>
+      <span>A grantee proves onchain activity to a committee, or a counterparty proves it can settle before a deal is struck, the proof, not the address, changes hands.</span>
     </div>
   </div>
 </section>
@@ -151,18 +151,18 @@
   <div class="note">
   <strong>Your wallet stays yours.</strong> Everything on this page runs in
   your browser. The chain is read, never written to, until you choose to
-  publish — and publishing records only hashes, never your address, never
-  amounts, never transactions. The optional AI analysis sees claim-level facts
-  only — never your address, never transaction hashes. A report without an AI
+  publish, and publishing records only hashes, never your address, never
+  amounts, never transactions. The optional AI analysis sees claim level facts
+  only, never your address, never transaction hashes. A report without an AI
   summary says "not analysed", never "verified by AI".
   </div>
 
   <div class="flow">
   <section class="card" id="step-1">
-    <div class="step-head"><span class="step-num">1</span><h2>Preview a wallet — no wallet needed</h2></div>
+    <div class="step-head"><span class="step-num">1</span><h2>Preview a wallet, no wallet needed</h2></div>
     <p>Paste any NEAR address and see its claims. The chain is public, so
-    everything in steps 1–4 runs in your browser with no wallet connected.
-    You only connect a wallet to sign the challenge and publish — and it
+    everything in steps 1 to 4 runs in your browser with no wallet connected.
+    You only connect a wallet to sign the challenge and publish, and it
     must be the wallet that owns the address you previewed. A preview alone
     proves nothing about who you are; the signature is the proof.</p>
     <label>Wallet address (.near or .testnet)
@@ -178,17 +178,17 @@
     <textarea id="linkedAddresses" placeholder="e.g. second-wallet.testnet"></textarea>
     </label>
     <p class="muted">Linking more wallets aggregates their balances, volume and
-    activity into one report — an agent's treasury is usually spread
+    activity into one report, an agent's treasury is usually spread
     across wallets. Each linked wallet proves ownership in one of two
-    ways: a small transfer to the primary address (below), or — no
-    transfer, no gas — by signing a short link statement. Leave the
+    ways: a small transfer to the primary address (below), or, no
+    transfer, no gas, by signing a short link statement. Leave the
     hash blank for a wallet you will link by signature instead.</p>
-    <label>Link transfer hash per linked wallet (one per line, same order — blank = link by signature instead)
+    <label>Link transfer hash per linked wallet (one per line, same order, blank = link by signature instead)
     <textarea id="linkedTxHashes" placeholder="hash of a transfer from the linked wallet to the primary address"></textarea>
     </label>
     <label>Balance history sampling
     <select id="sampleWindow">
-      <option value="0" selected>No sampling — score ignores sustained balance</option>
+      <option value="0" selected>No sampling, score ignores sustained balance</option>
       <option value="6">Sample the last 6 hours (4 readings)</option>
       <option value="24">Sample the last 24 hours (4 readings)</option>
       <option value="168">Sample the last 7 days (4 readings)</option>
@@ -207,7 +207,7 @@
   <section class="card" id="step-2">
     <div class="step-head"><span class="step-num">2</span><h2>Connect your wallet to sign</h2></div>
     <p>Connect the wallet that owns the address you previewed, then sign a
-    short ownership challenge. The signature is what a lender trusts — only
+    short ownership challenge. The signature is what a lender trusts, only
     the owner of the key could have made it. Publishing in step 5 is a
     transaction from the same wallet.</p>
     <p><button id="connectBtn" type="button">Connect wallet</button></p>
@@ -238,13 +238,13 @@
     </div>
     <p class="muted">Aggregate claims sum across every linked wallet (a transfer
     between two of your own wallets is counted once). Sustained and
-    time-weighted claims need balance sampling above.</p>
+    time weighted claims need balance sampling above.</p>
     <div class="row">
       <label>Aggregate balance at least (NEAR)<input id="polAggBalance" type="text" inputmode="decimal" placeholder=""></label>
       <label>Sustained balance at least (NEAR)<input id="polSustained" type="text" inputmode="decimal" placeholder=""></label>
     </div>
     <div class="row">
-      <label>Time-weighted balance at least (NEAR)<input id="polTimeWeighted" type="text" inputmode="decimal" placeholder=""></label>
+      <label>Time weighted balance at least (NEAR)<input id="polTimeWeighted" type="text" inputmode="decimal" placeholder=""></label>
     </div>
     <div class="row">
       <label>Aggregate minimum tx count<input id="polAggMinTx" type="text" inputmode="numeric" placeholder=""></label>
@@ -262,7 +262,7 @@
   <section class="card" id="step-4">
     <div class="step-head"><span class="step-num">4</span><h2>Disclose, analyse, build the report</h2></div>
     <p>Choose which evaluated claims go into the public report. Claims you
-    leave out are simply absent from the report — the verifier never sees
+    leave out are simply absent from the report, the verifier never sees
     them unless you disclose them another way.</p>
     <div id="discloseList"></div>
     <label>Report expiry
@@ -279,7 +279,7 @@
     <p class="muted">The underwriting judgment is advisory: NEAR AI Cloud reads the
     deterministic score and claim facts (never your address) and gives
     a lend / lend with limits / decline verdict with a suggested limit.
-    The score itself is the verifiable fact — any app can recompute it
+    The score itself is the verifiable fact, any app can recompute it
     from the disclosure package.</p>
     <p id="aiStatus" class="muted">AI analysis not run yet. The report will say "not analysed" unless you run it.</p>
     <div id="reportOut"></div>
@@ -287,7 +287,7 @@
       <button id="downloadReportBtn" type="button" disabled>Download report JSON</button>
       <button id="downloadDisclosureBtn" type="button" disabled>Download disclosure package JSON</button>
     </p>
-    <p class="muted">Verifier-bound disclosure (P4): paste one verifier's encryption public key (Curve25519, base64 — they generate it with the "Generate verifier key" tool on the verify page) and the disclosure package is sealed so only that verifier can open it. The sealed package expires with the report.</p>
+    <p class="muted">Verifier bound disclosure (P4): paste one verifier's encryption public key (Curve25519, base64, they generate it with the "Generate verifier key" tool on the verify page) and the disclosure package is sealed so only that verifier can open it. The sealed package expires with the report.</p>
     <p>
       <label for="verifierKeyInput">Verifier encryption public key (base64)</label>
       <input id="verifierKeyInput" type="text" autocomplete="off" spellcheck="false" placeholder="Base64 Curve25519 public key">
@@ -303,12 +303,12 @@
     <div class="step-head"><span class="step-num">5</span><h2>Publish the hashes onchain</h2></div>
     <div class="warn">
     <strong>Publishing is a real testnet transaction, signed by your wallet.</strong>
-    Only the three hashes and the report id go onchain — never your address,
+    Only the three hashes and the report id go onchain, never your address,
     never amounts, never transactions. The contract charges storage at cost
     and refunds any excess deposit.
     </div>
     <div id="publishBox">
-      <p id="publishCost" class="muted">Build a report first — the cost preview appears here.</p>
+      <p id="publishCost" class="muted">Build a report first, the cost preview appears here.</p>
       <label><input id="publishConfirm" type="checkbox" style="width:auto"> I have checked the report above and want to publish its hashes.</label>
       <p><button id="publishBtn" type="button" disabled>Publish onchain</button></p>
       <div id="publishOut"></div>
@@ -320,7 +320,7 @@
 
 <footer class="site-footer">
   <div class="wrap">
-    <p>VeilProof — NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
+    <p>VeilProof: NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
     <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
     <p><a href="index.html">Prover</a> · <a href="verify.html">Verifier portal</a> · <a href="https://github.com/Otoyo4real/Veilproof-" target="_blank" rel="noopener">GitHub repository</a></p>
   </div>

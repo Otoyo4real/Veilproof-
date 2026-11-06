@@ -13,58 +13,58 @@ npm install && npm test && npm run audit && npm run demo
 ```
 
 - `npm test` runs the full suite: engine, verifier, browser parity, and live onchain checks.
-- `npm run audit` runs the privacy audit: an attacker with only public data tries to recover a wallet address, link two reports to the same prover, and estimate the exact balance or score — then prints the results table.
+- `npm run audit` runs the privacy audit: an attacker with only public data tries to recover a wallet address, link two reports to the same prover, and estimate the exact balance or score, then prints the results table.
 - `npm run demo` builds a report from the committed demo history and verifies all 9 checks locally, no wallet or key needed.
 
 ## The idea
 
-Agents are starting to pay each other: compute, invoices, OTC deals. Before a deal, the other side wants proof the agent can pay — but publishing a treasury wallet invites targeting, scams and front-running. VeilProof is the proof layer for that deal:
+Agents are starting to pay each other: compute, invoices, OTC deals. Before a deal, the other side wants proof the agent can pay, but publishing a treasury wallet invites targeting, scams and front running. VeilProof is the proof layer for that deal:
 
-- **Multi-wallet aggregation.** An agent's treasury is usually spread across wallets. Link them all; balances, volume and activity are aggregated across every linked wallet (a transfer between two of your own wallets is counted once). Each linked wallet proves ownership with a small transfer to the primary wallet, or by signing a link message with its key (NEP-413, no transfer, no gas) — either way, only its key holder could have signed it.
-- **Time-weighted reputation.** A snapshot balance proves nothing — anyone can flash a deposit an hour before the report. VeilProof samples the balance at past block heights, so it proves the LOWEST balance held over the window and the average balance, not a momentary peak.
-- **A portable credit score (score-v2).** A deterministic 0–1000 score from onchain facts only: sustained balance (350), time-weighted balance (150), external activity and week spread (150), counterparty diversity (100), external volume (100), no failed transactions (100), staking (50). Activity and volume count external transactions only — wash transfers between the prover's own wallets earn nothing — so a prover washing funds between their own wallets scores 600, not 920. The rules are published in [docs/score-v2.md](docs/score-v2.md) (v1 rules stay in [docs/score-v1.md](docs/score-v1.md) for old reports), and the verifier recomputes the exact score from the same snapshots under the report's own version — a tampered score fails verification. Any app holding the disclosure package can recompute it too, so the score is reusable across apps: one report, many verifiers.
-- **An AI underwriter, not an AI verifier.** NEAR AI Cloud (TEE, attested) reads the deterministic score and the claim facts and gives an advisory verdict — lend, lend with limits (with a suggested limit in NEAR), or decline. The verdict is advisory by design: it never changes a report's validity, and a deterministic guard turns any 'lend' on a thin score (< 300) into a 'decline'. The score is the verifiable fact; the AI's judgment is the opinion on top of it.
-- **Private by construction.** The data lives on the chain, so it is genuine by definition. A chosen verifier checks the chain directly. The public sees only a report hash on NEAR and salted hash commitments of the addresses — a fresh random salt per report, carried only in the private disclosure package, so two reports from the same treasury cannot be matched from public data — never the addresses, never the amounts, never the transaction hashes.
+- **Multi wallet aggregation.** An agent's treasury is usually spread across wallets. Link them all; balances, volume and activity are aggregated across every linked wallet (a transfer between two of your own wallets is counted once). Each linked wallet proves ownership with a small transfer to the primary wallet, or by signing a link message with its key (NEP 413, no transfer, no gas), either way, only its key holder could have signed it.
+- **Time weighted reputation.** A snapshot balance proves nothing, anyone can flash a deposit an hour before the report. VeilProof samples the balance at past block heights, so it proves the LOWEST balance held over the window and the average balance, not a momentary peak.
+- **A portable credit score (score v2).** A deterministic 0 to 1000 score from onchain facts only: sustained balance (350), time weighted balance (150), external activity and week spread (150), counterparty diversity (100), external volume (100), no failed transactions (100), staking (50). Activity and volume count external transactions only, wash transfers between the prover's own wallets earn nothing, so a prover washing funds between their own wallets scores 600, not 920. The rules are published in [docs/score-v2.md](docs/score-v2.md) (v1 rules stay in [docs/score-v1.md](docs/score-v1.md) for old reports), and the verifier recomputes the exact score from the same snapshots under the report's own version, a tampered score fails verification. Any app holding the disclosure package can recompute it too, so the score is reusable across apps: one report, many verifiers.
+- **An AI underwriter, not an AI verifier.** NEAR AI Cloud (TEE, attested) reads the deterministic score and the claim facts and gives an advisory verdict, lend, lend with limits (with a suggested limit in NEAR), or decline. The verdict is advisory by design: it never changes a report's validity, and a deterministic guard turns any 'lend' on a thin score (< 300) into a 'decline'. The score is the verifiable fact; the AI's judgment is the opinion on top of it.
+- **Private by construction.** The data lives on the chain, so it is genuine by definition. A chosen verifier checks the chain directly. The public sees only a report hash on NEAR and salted hash commitments of the addresses, a fresh random salt per report, carried only in the private disclosure package, so two reports from the same treasury cannot be matched from public data, never the addresses, never the amounts, never the transaction hashes.
 
-## What this proves — and what it does not
+## What this proves, and what it does not
 
 | Claim | What proves it |
 | --- | --- |
-| The data is genuine | The verifier re-fetches it from the chain. Onchain data cannot be typed in by the user. |
+| The data is genuine | The verifier refetches it from the chain. Onchain data cannot be typed in by the user. |
 | The balance was held, not flashed | Sampled balance history at past block heights: the lowest sampled balance over the window. |
 | The wallets are all the prover's | Each linked wallet proves ownership with a transfer to the primary wallet. |
-| The credit score is real | The score is deterministic (score-v2, published rules): the verifier recomputes it from the same snapshots. A tampered score fails verification. |
-| The underwriting opinion is honest | NEAR AI Cloud TEE attestation, nonce-bound to the request. Advisory only; a thin score can never support a lend. |
-| The report was not altered | SHA-256 report hash anchored on NEAR; tampering fails verification. |
+| The credit score is real | The score is deterministic (score v2, published rules): the verifier recomputes it from the same snapshots. A tampered score fails verification. |
+| The underwriting opinion is honest | NEAR AI Cloud TEE attestation, nonce bound to the request. Advisory only; a thin score can never support a lend. |
+| The report was not altered | SHA 256 report hash anchored on NEAR; tampering fails verification. |
 | The wallet belongs to the prover | The prover signs a challenge with the wallet key (deterministic, auditable). |
 | The wallet address stays private | Only a hash commitment is published. The address travels only in the private disclosure package to the verifier the prover chose. |
 
-What it does **not** prove: anything about offchain data. VeilProof only ever makes claims about onchain data. The backend fetches chain data for the analysis — that fetch is auditable (the report records the block height and data hash, and the verifier can re-fetch the same data once the address is disclosed to them).
+What it does **not** prove: anything about offchain data. VeilProof only ever makes claims about onchain data. The backend fetches chain data for the analysis, that fetch is auditable (the report records the block height and data hash, and the verifier can refetch the same data once the address is disclosed to them).
 
-## What stays private — and from whom (the honest trade-off)
+## What stays private, and from whom (the honest trade off)
 
 VeilProof is a **hybrid** privacy model, and it owns that plainly:
 
 | Party | Sees |
 | --- | --- |
-| The public | Only hashes — the report hash, evidence hash and policy hash on NEAR, and salted hash commitments of the addresses (fresh random salt per report, so two reports from the same treasury cannot be matched). Never the addresses, never the amounts, never the tx hashes. A tripwire in the report builder enforces this. |
-| The chosen verifier | The addresses and the data — because they must re-fetch the chain and re-run the checks themselves. That is the point: verification is real, not a trust-me. The prover chooses exactly which verifier gets the disclosure package. |
-| The AI backend | The deterministic score, claim-level aggregates and windows only — never the addresses, never the tx hashes. The analysis prompt is sanitised by an allowlist, and any address-like field is rejected before it reaches the model. |
+| The public | Only hashes, the report hash, evidence hash and policy hash on NEAR, and salted hash commitments of the addresses (fresh random salt per report, so two reports from the same treasury cannot be matched). Never the addresses, never the amounts, never the tx hashes. A tripwire in the report builder enforces this. |
+| The chosen verifier | The addresses and the data, because they must refetch the chain and rerun the checks themselves. That is the point: verification is real, not a trust me. The prover chooses exactly which verifier gets the disclosure package. |
+| The AI backend | The deterministic score, claim level aggregates and windows only, never the addresses, never the tx hashes. The analysis prompt is sanitised by an allowlist, and any address like field is rejected before it reaches the model. |
 
-What VeilProof does **not** do: hide the address from the verifier, or hide it from the prover's own browser. A design where even the verifier never learns the address would need pure zero-knowledge proving; this project chose the hybrid on purpose, because a lender who cannot re-check the chain is a lender who has to trust the proof system instead — and that trust is exactly what the disclosure model removes.
+What VeilProof does **not** do: hide the address from the verifier, or hide it from the prover's own browser. A design where even the verifier never learns the address would need pure zero knowledge proving; this project chose the hybrid on purpose, because a lender who cannot recheck the chain is a lender who has to trust the proof system instead, and that trust is exactly what the disclosure model removes.
 
-It also does not run the verification inside a TEE. The verification is deterministic, public and re-runnable by anyone — that is the trust basis, and it needs no enclave. The TEE attests only the AI summary. Running the verifier itself in an enclave is documented as future work in [docs/in-enclave-verification.md](docs/in-enclave-verification.md): NEAR AI Cloud is inference-only, so there is no code-execution surface to run it on today.
+It also does not run the verification inside a TEE. The verification is deterministic, public and rerunnable by anyone, that is the trust basis, and it needs no enclave. The TEE attests only the AI summary. Running the verifier itself in an enclave is documented as future work in [docs/in-enclave-verification.md](docs/in-enclave-verification.md): NEAR AI Cloud is inference only, so there is no code execution surface to run it on today.
 
 ## The score, in one paragraph
 
-score-v2 is 0–1000 from seven components, all computed from the disclosed snapshots under the policy's windows: sustained balance (lowest sampled balance, 350), time-weighted balance (mean sampled balance, 150), activity (external success tx count plus a spread bonus when txs span at least 3 ISO weeks, 150), counterparty diversity (distinct outside counterparties, 100), volume (external volume, 100), no failed transactions (100), staking (50). Activity and volume count external transactions only — a tx counts when at least one endpoint is outside the bundle — so wash transfers between the prover's own wallets earn nothing in those components or in diversity. A feature the prover did not measure scores 0 and is marked unmeasured — the score never hides what it did not see. Bands: 0–299 thin, 300–599 building, 600–799 solid, 800–1000 strong. The full rules, with the exact tier thresholds, are in [docs/score-v2.md](docs/score-v2.md); score-v1 (six components, activity 200 counting every tx, no diversity) stays in [docs/score-v1.md](docs/score-v1.md) and the verifier recomputes old reports under v1. The score is calibrated for testnet-scale treasuries; a mainnet-scale recalibration would ship as score-v3, and the version field exists so versions are never confused.
+score v2 is 0 to 1000 from seven components, all computed from the disclosed snapshots under the policy's windows: sustained balance (lowest sampled balance, 350), time weighted balance (mean sampled balance, 150), activity (external success tx count plus a spread bonus when txs span at least 3 ISO weeks, 150), counterparty diversity (distinct outside counterparties, 100), volume (external volume, 100), no failed transactions (100), staking (50). Activity and volume count external transactions only, a tx counts when at least one endpoint is outside the bundle, so wash transfers between the prover's own wallets earn nothing in those components or in diversity. A feature the prover did not measure scores 0 and is marked unmeasured, the score never hides what it did not see. Bands: 0 to 299 thin, 300 to 599 building, 600 to 799 solid, 800 to 1000 strong. The full rules, with the exact tier thresholds, are in [docs/score-v2.md](docs/score-v2.md); score v1 (six components, activity 200 counting every tx, no diversity) stays in [docs/score-v1.md](docs/score-v1.md) and the verifier recomputes old reports under v1. The score is calibrated for testnet scale treasuries; a mainnet scale recalibration would ship as score v3, and the version field exists so versions are never confused.
 
 ## Status
 
 Built and live. Registry deployed on NEAR testnet. The live demo claim is a
-multi-wallet agent treasury proof: report `b05bf4684960ee83`, publish tx
+multi wallet agent treasury proof: report `b05bf4684960ee83`, publish tx
 `3ouNst9DcYkcptEpua7EzqdLDmuY8P8uFsKRgU9TW9PQ`, score band **solid** (the
-public report carries the band, not the exact score — the prover's own exact
+public report carries the band, not the exact score, the prover's own exact
 score is 770), AI underwriting **lend_with_limits, suggested limit 5 NEAR**.
 All 9 checks pass onchain, and the full test suite is green (140 tests).
 The live site runs the AI underwriting with a real attested summary. Earlier
@@ -77,21 +77,21 @@ Testnet only.
 ## Judge in 10 minutes
 
 1. Open https://veilproof22.vercel.app/verify.html and press
-   **Try the live demo claim** — a real published multi-wallet claim is
+   **Try the live demo claim**, a real published multi wallet claim is
    verified against its onchain record. You should see VALID and all nine
    checks passing: prover binding (including the linked wallet), hashes,
-   claims (predicates — thresholds and pass/fail, no exact values), the
-   recomputed score band (solid), the link proof, and validity — plus the
+   claims (predicates, thresholds and pass/fail, no exact values), the
+   recomputed score band (solid), the link proof, and validity, plus the
    attested underwriting summary.
 2. On the main page, build a report for the demo wallet yourself and press
-   **Underwrite with NEAR AI** — the verdict comes back attested
+   **Underwrite with NEAR AI**, the verdict comes back attested
    (verifiable, nonce matched), advisory only.
 3. Publish the report (demo wallet, testnet) and verify it the same way.
-   Then paste a tampered report — the hash checks fail. Revoke it — the
+   Then paste a tampered report, the hash checks fail. Revoke it, the
    validity check fails.
 4. Seal a disclosure package for one verifier: on the main page, after
    building a report, paste a verifier's encryption public key and press
-   **Encrypt disclosure for this verifier** — only that verifier can
+   **Encrypt disclosure for this verifier**, only that verifier can
    open it, and it expires with the report. On the verify page, paste
    the sealed package and your verifier secret key (or generate a
    keypair there first). See `docs/verifier-bound-disclosure.md`.
@@ -101,15 +101,15 @@ testnet registry, and a failed check says so.
 
 ## Layout
 
-- `contract/` — `veilproof_registry` Rust contract (claim hashes only, never
+- `contract/`: `veilproof_registry` Rust contract (claim hashes only, never
   addresses or amounts in plaintext).
-- `src/` — deterministic claims engine, score-v2 (v1 kept for old reports), onchain ingestion (NEAR RPC),
+- `src/`: deterministic claims engine, score v2 (v1 kept for old reports), onchain ingestion (NEAR RPC),
   report hashing, attestation handling, AI consistency + underwriting.
-- `api/` — Vercel serverless routes (analysis, verification, report).
-- `public/` — static frontend.
-- `docs/` — published scoring rules (`score-v2.md`, with `score-v1.md` kept for old reports) any app can re-run.
-- `test/` — engine + API tests.
-- `demo/` — demo script and sample data.
+- `api/`: Vercel serverless routes (analysis, verification, report).
+- `public/`: static frontend.
+- `docs/`: published scoring rules (`score-v2.md`, with `score-v1.md` kept for old reports) any app can rerun.
+- `test/`: engine + API tests.
+- `demo/`: demo script and sample data.
 
 ## Demo (13 steps)
 
@@ -123,6 +123,6 @@ testnet registry, and a failed check says so.
 8. Report hash is published on NEAR testnet.
 9. Verifier opens the report link.
 10. Verifier receives the private disclosure package (address + data).
-11. Verifier re-fetches the chain data and confirms the claims.
+11. Verifier refetches the chain data and confirms the claims.
 12. A tampered report fails integrity verification.
 13. A revoked report is rejected.

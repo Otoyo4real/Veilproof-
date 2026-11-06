@@ -142,3 +142,41 @@ test('app.js keeps private data out of the AI request and the public report', ()
   assert.ok(appJs.includes("methodName: 'publish_claim'"), 'publish must call publish_claim');
   assert.ok(appJs.includes('receiverId: REGISTRY'), 'publish must target the registry contract');
 });
+
+test('both pages are responsive: viewport, scrollable tables, stacked proof table', () => {
+  const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
+  const verifyHtml = readFileSync(new URL('../public/verify.html', import.meta.url), 'utf8');
+  const demoJs = readFileSync(new URL('../public/demo.js', import.meta.url), 'utf8');
+  // Viewport meta so phones scale the page instead of shrinking a
+  // desktop layout.
+  assert.ok(html.includes('width=device-width, initial-scale=1'), 'index.html must set the viewport');
+  assert.ok(verifyHtml.includes('width=device-width, initial-scale=1'), 'verify.html must set the viewport');
+  // Tables scroll inside their card instead of forcing the page wide.
+  assert.ok(css.includes('.table-scroll'), 'style.css must define the table-scroll wrapper');
+  assert.ok(css.includes('.table-scroll { overflow-x: auto'), 'table-scroll must scroll horizontally');
+  for (const [name, src] of [['app.js', appJs], ['demo.js', demoJs], ['verify.html', verifyHtml]]) {
+    assert.ok(src.includes('class="table-scroll"'), `${name} must wrap its tables in a table-scroll div`);
+  }
+  // The "what it proves" table stacks into cards on a phone, because
+  // its first column is nowrap and would otherwise overflow.
+  assert.ok(css.includes('.proves-table tr:first-child { display: none; }'), 'proves-table header must hide on small screens');
+  assert.ok(css.includes('.proves-table tr { display: block;'), 'proves-table rows must stack on small screens');
+  assert.ok(css.includes('.proves-table td:first-child { white-space: normal;'), 'proves-table claim cell must wrap on small screens');
+  // Header wraps instead of overflowing on a narrow phone.
+  assert.ok(css.includes('.site-header .wrap {') && css.includes('flex-wrap: wrap;'), 'site header must wrap');
+  // Hero calls to action stack full-width on a phone for easy tapping.
+  assert.ok(css.includes('.cta-row button, .cta-row .btn { flex: 1 1 100%;'), 'hero CTAs must go full-width on small screens');
+});
+
+test('demo.js renders the public predicate report, never an exact value', () => {
+  const demoJs = readFileSync(new URL('../public/demo.js', import.meta.url), 'utf8');
+  // The live demo report is predicate-only (P3): claims carry a
+  // threshold, the score carries a band. Rendering esc(c.value) or
+  // report.score.value would print "undefined" on the live site.
+  assert.ok(!demoJs.includes('esc(c.value)'), 'demo must not render a claim value');
+  assert.ok(!demoJs.includes('report.score.value +'), 'demo must not render a score value as a number');
+  assert.ok(!demoJs.includes("c.points + ' / '"), 'demo must not render per-component points');
+  assert.ok(demoJs.includes('<th>Claim</th><th>Passed</th><th>Threshold</th>'), 'demo claims table must be Claim / Passed / Threshold');
+  assert.ok(demoJs.includes("band ' + esc(report.score.band)"), 'demo score must show the band when no value is present');
+  assert.ok(demoJs.includes('<th>Component</th><th>Max</th><th>Measured</th>'), 'demo score table must be Component / Max / Measured');
+});

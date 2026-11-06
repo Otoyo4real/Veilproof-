@@ -155,7 +155,7 @@ function readPreviewAddress() {
   const implicit = /^[0-9a-f]{64}$/.test(raw);
   if (!named && !implicit) {
     throw new Error(
-      'That does not look like a NEAR address — use a named account ending in .near or .testnet, or a 64-character hex account.',
+      'That does not look like a NEAR address, use a named account ending in .near or .testnet, or a 64 character hex account.',
     );
   }
   state.previewAddress = raw;
@@ -189,11 +189,11 @@ function invalidateReport(note) {
     state.disclosurePackage = null;
     state.hashes = null;
     $('reportOut').innerHTML =
-      '<p class="warn">The inputs changed — ' + esc(note) + ' Rebuild the report before publishing.</p>';
+      '<p class="warn">The inputs changed, ' + esc(note) + ' Rebuild the report before publishing.</p>';
     $('downloadReportBtn').disabled = true;
     $('downloadDisclosureBtn').disabled = true;
     $('publishBtn').disabled = true;
-    $('publishCost').textContent = 'Build a report first — the cost preview appears here.';
+    $('publishCost').textContent = 'Build a report first, the cost preview appears here.';
     saveState();
   }
 }
@@ -235,7 +235,7 @@ function updateWalletUI() {
     $('challengeOut').innerHTML =
       '<p class="warn">Connected wallet <span class="mono">' + esc(state.accountId) + '</span> does not own the previewed address' +
       (state.previewAddress ? ' <span class="mono">' + esc(state.previewAddress) + '</span>' : '') +
-      '. Switch wallets to sign the challenge for the previewed address — or preview a different address.</p>';
+      '. Switch wallets to sign the challenge for the previewed address, or preview a different address.</p>';
   }
   $('evaluateBtn').disabled = !state.snapshot;
   $('aiBtn').disabled = !state.evaluation;
@@ -321,14 +321,14 @@ async function signChallenge() {
     const signature = result?.signature ?? result?.signedMessage?.signature ?? null;
     const publicKey = result?.publicKey ?? result?.signedMessage?.publicKey ?? null;
     state.challenge = { challengeId, message, nonce, signature, publicKey, raw: result ?? null };
-    let keyCheck = 'Public key not returned by the wallet — could not check it against the account.';
+    let keyCheck = 'Public key not returned by the wallet, could not check it against the account.';
     if (typeof publicKey === 'string' && publicKey) {
       try {
         const keys = await rpcViewAccessKeyList(state.accountId);
         const found = keys.some((k) => k.public_key === publicKey);
         keyCheck = found
-          ? `Public key ${publicKey} IS one of the account's access keys — the signer controls this account.`
-          : `Public key ${publicKey} is NOT among the account's access keys — do not trust this signature.`;
+          ? `Public key ${publicKey} IS one of the account's access keys, the signer controls this account.`
+          : `Public key ${publicKey} is NOT among the account's access keys, do not trust this signature.`;
       } catch (err) {
         keyCheck = 'Could not fetch the account access keys to check the public key: ' + err.message;
       }
@@ -339,13 +339,13 @@ async function signChallenge() {
       '<p class="mono">Public key: ' + esc(publicKey || '(not returned)') + '</p>' +
       '<p class="mono">Signature: ' + esc(signature || '(not returned)') + '</p>' +
       '<p>' + esc(keyCheck) + '</p>' +
-      '<p class="muted">Full cryptographic verification of the NEP-413 payload is not done here — ' +
+      '<p class="muted">Full cryptographic verification of the NEP 413 payload is not done here, ' +
       'the publish transaction in step 5 is the binding proof onchain (the registry records the signer as the claim owner).</p>';
     saveState();
   } catch (err) {
     out.innerHTML =
       '<p class="error">Challenge signing failed: ' + esc(err.message) + '</p>' +
-      '<p class="muted">Some wallets do not support message signing. The flow continues — ' +
+      '<p class="muted">Some wallets do not support message signing. The flow continues, ' +
       'the publish transaction itself still proves ownership.</p>';
   }
 }
@@ -378,7 +378,7 @@ async function loadDemoHistory() {
     $('txHashes').value = history.transfers.map((t) => `${t.hash},${t.senderId}`).join('\n');
     $('snapshotOut').innerHTML =
       '<p class="ok">Demo history loaded: ' + history.transfers.length + ' transfers for <span class="mono">' +
-      esc(history.accountId) + '</span>. Press "Fetch snapshot" to verify them onchain — no wallet needed.</p>';
+      esc(history.accountId) + '</span>. Press "Fetch snapshot" to verify them onchain, no wallet needed.</p>';
     updateWalletUI();
     saveState();
   } catch (err) {
@@ -392,7 +392,7 @@ function parseLinkedAddresses() {
     const named = /^[a-z0-9._-]{2,64}$/.test(addr) && (addr.endsWith('.near') || addr.endsWith('.testnet'));
     const implicit = /^[0-9a-f]{64}$/.test(addr);
     if (!named && !implicit) throw new Error(`Linked address does not look like a NEAR address: ${addr}`);
-    if (addr === state.previewAddress) throw new Error(`Linked address ${addr} is the primary address — list it only once.`);
+    if (addr === state.previewAddress) throw new Error(`Linked address ${addr} is the primary address, list it only once.`);
   }
   if (new Set(raw).size !== raw.length) throw new Error('Linked addresses contain a duplicate.');
   return raw;
@@ -486,7 +486,7 @@ function renderSnapshot(snapshot, address, entriesCount, sampleHours) {
         return '<span class="mono">' + esc(w.address) + '</span> (' + method + ')';
       }).join(', ') + '.</p>' +
       (state.linkedWallets.some((w) => !w.linkTxHash && !w.linkSignature)
-        ? '<p>For each wallet above that still needs a link: switch to that wallet in your wallet app, then press its Sign link button. No transfer, no gas — the signature is the proof.</p>' +
+        ? '<p>For each wallet above that still needs a link: switch to that wallet in your wallet app, then press its Sign link button. No transfer, no gas, the signature is the proof.</p>' +
           state.linkedWallets.map((w, i) => (!w.linkTxHash && !w.linkSignature
             ? '<p><button type="button" data-sign-link="' + i + '">Sign link for ' + esc(w.address) + '</button> <span data-sign-link-out="' + i + '"></span></p>'
             : '')).join('')
@@ -531,17 +531,17 @@ async function signLink(index) {
     const signature = result?.signature ?? result?.signedMessage?.signature ?? null;
     const publicKey = result?.publicKey ?? result?.signedMessage?.publicKey ?? null;
     if (!signature || !publicKey) {
-      setOut('<span class="error">The wallet did not return a signature and public key — the link was not proved.</span>');
+      setOut('<span class="error">The wallet did not return a signature and public key, the link was not proved.</span>');
       return;
     }
     const keys = await rpcViewAccessKeyList(entry.address);
     if (!keys.some((k) => k.public_key === publicKey)) {
-      setOut('<span class="error">Public key ' + esc(publicKey) + ' is NOT one of ' + esc(entry.address) + ' access keys — the link was not proved. Switch to that wallet and try again.</span>');
+      setOut('<span class="error">Public key ' + esc(publicKey) + ' is NOT one of ' + esc(entry.address) + ' access keys, the link was not proved. Switch to that wallet and try again.</span>');
       return;
     }
     const linkSignature = { message, nonce, recipient: REGISTRY, signature, publicKey };
     if (!(await verifyLinkSignature(linkSignature))) {
-      setOut('<span class="error">The signature did not verify — the link was not proved.</span>');
+      setOut('<span class="error">The signature did not verify, the link was not proved.</span>');
       return;
     }
     entry.linkSignature = linkSignature;
@@ -583,7 +583,7 @@ function readPolicy() {
   }
   const noFailed = $('polNoFailed').value.trim();
   if (noFailed) {
-    if (!/^\d+$/.test(noFailed)) throw new Error('No-failed window must be a whole number of days.');
+    if (!/^\d+$/.test(noFailed)) throw new Error('No failed window must be a whole number of days.');
     policy.noFailedWindowDays = Number(noFailed);
   }
   const aggBalance = $('polAggBalance').value.trim();
@@ -623,9 +623,9 @@ function renderClaims() {
   const { claims, allPassed } = state.evaluation;
   $('claimsOut').innerHTML =
     '<p class="' + (allPassed ? 'ok' : 'error') + '">' +
-    (allPassed ? 'All claims pass.' : 'Some claims do not pass — they can still be published as failing claims.') +
+    (allPassed ? 'All claims pass.' : 'Some claims do not pass, they can still be published as failing claims.') +
     '</p>' +
-    '<table><tr><th>Claim</th><th>Passed</th><th>Value</th><th>Threshold</th></tr>' +
+    '<div class="table-scroll"><table><tr><th>Claim</th><th>Passed</th><th>Value</th><th>Threshold</th></tr>' +
     claims
       .map(
         (c) =>
@@ -633,26 +633,26 @@ function renderClaims() {
           esc(c.value) + '</td><td class="mono">' + esc(c.threshold) + '</td></tr>',
       )
       .join('') +
-    '</table>';
+    '</table></div>';
   $('discloseList').innerHTML =
     '<p><strong>Disclose in the public report:</strong></p>' +
     claims
       .map(
         (c) =>
           '<label><input type="checkbox" data-claim="' + esc(c.id) + '" checked style="width:auto"> ' +
-          esc(c.id) + ' — ' + (c.passed ? 'passed' : 'did not pass') + '</label>',
+          esc(c.id) + ', ' + (c.passed ? 'passed' : 'did not pass') + '</label>',
       )
       .join('');
   const score = state.score;
   $('scoreOut').innerHTML = score
     ? '<h3>Portable credit score (' + esc(score.version) + ')</h3>' +
-      '<p><strong>' + score.value + ' / 1000 — ' + esc(score.band) + '</strong></p>' +
-      '<p class="muted">Deterministic and recomputable: any app holding the disclosure package can re-run the same published rules and get this exact number. That is what makes it reusable across apps.</p>' +
-      '<table><tr><th>Component</th><th>Points</th><th>Measured</th></tr>' +
+      '<p><strong>' + score.value + ' / 1000, ' + esc(score.band) + '</strong></p>' +
+      '<p class="muted">Deterministic and recomputable: any app holding the disclosure package can rerun the same published rules and get this exact number. That is what makes it reusable across apps.</p>' +
+      '<div class="table-scroll"><table><tr><th>Component</th><th>Points</th><th>Measured</th></tr>' +
       score.components
         .map((c) => '<tr><td>' + esc(c.label) + '</td><td>' + c.points + ' / ' + c.max + '</td><td>' + (c.measured ? 'yes' : 'not measured') + '</td></tr>')
         .join('') +
-      '</table>'
+      '</table></div>'
     : '';
   updateWalletUI();
 }
@@ -678,7 +678,7 @@ function evaluate() {
     state.aiSummary = null;
     state.attestationRef = null;
     $('aiStatus').textContent = 'AI underwriting not run yet for these claims. The report will say "not analysed" unless you run it.';
-    invalidateReport('the claims were re-evaluated.');
+    invalidateReport('the claims were reevaluated.');
     renderClaims();
     saveState();
   } catch (err) {
@@ -754,7 +754,7 @@ async function runAiAnalysis() {
     }
     if (body.status === 'not_configured') {
       status.textContent =
-        'AI underwriting not available yet — the separate VeilProof NEAR AI key is not set on the server. ' +
+        'AI underwriting not available yet, the separate VeilProof NEAR AI key is not set on the server. ' +
         'The report will say "not analysed", which is honest, not a failure.';
       state.aiSummary = null;
       state.attestationRef = null;
@@ -804,7 +804,7 @@ function computeExpiresAt(days) {
   const expires = nowNs + BigInt(days) * 86400n * 1000000000n;
   const aligned = expires - (expires % 1000000000n);
   if (BigInt(Number(aligned)) !== aligned) {
-    throw new Error('expiry timestamp is not exactly representable as a JSON number — refusing to publish');
+    throw new Error('expiry timestamp is not exactly representable as a JSON number, refusing to publish');
   }
   return aligned.toString();
 }
@@ -871,13 +871,13 @@ async function buildReportAndHashes() {
     state.disclosurePackage = disclosurePackage;
     state.hashes = hashes;
     out.innerHTML =
-      '<p class="ok">Report built. Clean check passed — the report contains no address and no transaction hash.</p>' +
+      '<p class="ok">Report built. Clean check passed, the report contains no address and no transaction hash.</p>' +
       '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
-      '<p>Prover commitment (salted SHA-256 of the address — fresh salt per report, so two reports from the same treasury cannot be matched; the address itself is never shown):<br><span class="mono">' +
+      '<p>Prover commitment (salted SHA 256 of the address, fresh salt per report, so two reports from the same treasury cannot be matched; the address itself is never shown):<br><span class="mono">' +
       esc(report.prover) + '</span></p>' +
       (report.linkedProvers.length > 0 ? '<p>Linked wallets: ' + report.linkedProvers.length + ' (commitments only).</p>' : '') +
       (report.score
-        ? '<p>Credit score: <strong>' + state.score.value + ' / 1000 (' + esc(report.score.band) + ')</strong> — your exact score; the public report carries only the band, recomputable by any app from the disclosure package.</p>'
+        ? '<p>Credit score: <strong>' + state.score.value + ' / 1000 (' + esc(report.score.band) + ')</strong>, your exact score; the public report carries only the band, recomputable by any app from the disclosure package.</p>'
         : '<p>Credit score: not scored.</p>') +
       '<p>AI summary: ' + (report.aiSummary === null ? 'Not analysed.' : esc(report.aiSummary.verdict ?? report.aiSummary.role ?? 'analysed') + ' (NEAR AI Cloud, advisory).') + '</p>' +
       '<p>Report hash: <span class="mono">' + esc(hashes.report_hash) + '</span></p>' +
@@ -892,7 +892,7 @@ async function buildReportAndHashes() {
     $('encryptOut').innerHTML = '';
     $('publishCost').innerHTML =
       'Publishing attaches <strong>0.01 NEAR</strong> and a 100 TGas gas limit. ' +
-      'The contract charges storage at cost (roughly 0.003–0.005 NEAR for a claim record) and refunds the excess deposit; ' +
+      'The contract charges storage at cost (roughly 0.003 to 0.005 NEAR for a claim record) and refunds the excess deposit; ' +
       'you pay only for gas actually used. The wallet shows the exact amounts before you sign.';
     $('publishBtn').disabled = !$('publishConfirm').checked;
     refreshPublishBtn();
@@ -917,7 +917,7 @@ async function encryptDisclosureForVerifier() {
     state.encryptedDisclosurePackage = encrypted;
     const fingerprint = (await verifierKeyFingerprint(key)).slice(0, 16);
     out.innerHTML =
-      '<p class="ok">Sealed for verifier key ' + esc(fingerprint) + '… — only that verifier can open it.</p>' +
+      '<p class="ok">Sealed for verifier key ' + esc(fingerprint) + '…, only that verifier can open it.</p>' +
       '<p>Expires with the report: <span class="mono">' +
       esc(new Date(Number(BigInt(state.report.expiresAt) / 1000000n)).toISOString()) + '</span></p>';
     $('downloadEncryptedBtn').disabled = false;
@@ -951,7 +951,7 @@ async function publish() {
     if (!previewMatchesConnected()) {
       throw new Error(
         'Connect the wallet that owns ' + (state.previewAddress || 'the previewed address') +
-          ' before publishing — the connected wallet ' + (state.accountId || '(none)') + ' does not own it.',
+          ' before publishing, the connected wallet ' + (state.accountId || '(none)') + ' does not own it.',
       );
     }
     const nw = fastnear();
@@ -988,7 +988,7 @@ async function publish() {
         'They can check it at <a href="verify.html">the verifier portal</a> using the report ID above.</p>';
     } else {
       out.innerHTML =
-        '<p class="ok">The wallet returned without a readable transaction hash — the transaction may still have been submitted. Check the wallet activity or the registry directly.</p>' +
+        '<p class="ok">The wallet returned without a readable transaction hash, the transaction may still have been submitted. Check the wallet activity or the registry directly.</p>' +
         '<pre>' + esc(JSON.stringify(result ?? null, null, 2)) + '</pre>';
     }
     saveState();

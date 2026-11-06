@@ -13,7 +13,7 @@
 export async function sha256Hex(str) {
   const c = globalThis.crypto;
   if (!c || !c.subtle) {
-    throw new Error('sha256Hex: Web Crypto (crypto.subtle) is unavailable — use a secure context (https or localhost)');
+    throw new Error('sha256Hex: Web Crypto (crypto.subtle) is unavailable, use a secure context (https or localhost)');
   }
   const buf = await c.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -22,7 +22,7 @@ export async function sha256Hex(str) {
 export function randomHex(byteCount) {
   const c = globalThis.crypto;
   if (!c || !c.getRandomValues) {
-    throw new Error('randomHex: crypto.getRandomValues is unavailable — use a secure context (https or localhost)');
+    throw new Error('randomHex: crypto.getRandomValues is unavailable, use a secure context (https or localhost)');
   }
   const bytes = new Uint8Array(byteCount);
   c.getRandomValues(bytes);

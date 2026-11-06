@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VeilProof — Verify a report</title>
+<title>VeilProof: Verify a report</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -21,17 +21,17 @@
 <section class="hero hero-dark">
   <p class="eyebrow">Verifier portal</p>
   <h1>Verify a report</h1>
-  <p class="lede">Someone sent you a VeilProof report — a lender, a grant committee, a deal
+  <p class="lede">Someone sent you a VeilProof report, a lender, a grant committee, a deal
   partner. Check it here in one click. No account, no wallet, nothing leaves
-  your browser except two read-only view calls to the NEAR testnet RPC.</p>
+  your browser except two read only view calls to the NEAR testnet RPC.</p>
   <div class="cta-row">
     <button id="demoBtn" type="button">Try the live demo claim</button>
   </div>
   <p id="demoStatus" class="muted"></p>
   <p>The demo loads a real published claim from the demo wallet and verifies it
-  against its onchain record — all nine checks should pass, including the
-  AI summary. The report proves claims about a wallet's onchain history — for
-  example "balance at least 5 NEAR" — without revealing which wallet to the
+  against its onchain record, all nine checks should pass, including the
+  AI summary. The report proves claims about a wallet's onchain history, for
+  example "balance at least 5 NEAR", without revealing which wallet to the
   public.</p>
 </section>
 
@@ -39,9 +39,9 @@
 <strong>What verification proves.</strong> The report hash, evidence hash
 and policy hash match the record published on NEAR, so the report was not
 altered after publication. The data hash is recomputed from the disclosure
-snapshot, and the claims are re-run from that snapshot, so the claims
-follow from chain data the verifier can re-fetch. The wallet address is
-never shown here — only its hash commitment.
+snapshot, and the claims are rerun from that snapshot, so the claims
+follow from chain data the verifier can refetch. The wallet address is
+never shown here, only its hash commitment.
 <strong>What it does not prove.</strong> Nothing about data that never
 touched the chain. A report with no AI summary means "not analysed", not
 "verified by AI".
@@ -61,21 +61,21 @@ touched the chain. A report with no AI summary means "not analysed", not
   <div class="step-head"><span class="step-num">2</span><h2>Disclosure package (private)</h2></div>
   <p><strong>Only paste this here, in your own browser.</strong> It contains
   the wallet address. This page sends it nowhere: verification runs locally,
-  and the only network calls are two read-only view calls
+  and the only network calls are two read only view calls
   (<span class="mono">get_claim</span> and
   <span class="mono">is_claim_valid</span>) to the NEAR testnet RPC.</p>
   <label>Disclosure package JSON
   <textarea id="disclosureJson" placeholder='{"reportId": "...", "address": "...", "snapshot": {...}, "dataHash": "..."}'></textarea>
   </label>
-  <p class="muted">Sealed package? If the prover sent you an <em>encrypted</em> disclosure (version <span class="mono">veilproof-encrypted-disclosure-v1</span>), paste it here and put your verifier secret key below — the page opens it locally, in your browser, and rejects it if it has expired. Nothing is sent anywhere.</p>
+  <p class="muted">Sealed package? If the prover sent you an <em>encrypted</em> disclosure (version <span class="mono">veilproof encrypted disclosure v1</span>), paste it here and put your verifier secret key below, the page opens it locally, in your browser, and rejects it if it has expired. Nothing is sent anywhere.</p>
   <p>
     <button id="genVerifierKeyBtn" type="button">Generate verifier keypair</button>
     <span id="verifierKeyOut" class="muted"></span>
   </p>
-  <label>Your verifier secret key (base64 — only needed for a sealed package; never share it)
+  <label>Your verifier secret key (base64, only needed for a sealed package; never share it)
   <input id="verifierSecretKey" type="password" autocomplete="off" spellcheck="false" placeholder="Base64 Curve25519 secret key">
   </label>
-  <p class="muted">Give the prover your <strong>public</strong> key (shown after generating) — never the secret key above.</p>
+  <p class="muted">Give the prover your <strong>public</strong> key (shown after generating), never the secret key above.</p>
 </section>
 
 <section class="card">
@@ -114,7 +114,7 @@ touched the chain. A report with no AI summary means "not analysed", not
 
 <footer class="site-footer">
   <div class="wrap">
-    <p>VeilProof — NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
+    <p>VeilProof: NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
     <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
   </div>
 </footer>
@@ -246,7 +246,7 @@ touched the chain. A report with no AI summary means "not analysed", not
 
   async function sha256Hex(str) {
     if (typeof crypto === 'undefined' || !crypto.subtle) {
-      throw new Error('sha256Hex: Web Crypto (crypto.subtle) is unavailable — use a secure context (https or localhost)');
+      throw new Error('sha256Hex: Web Crypto (crypto.subtle) is unavailable, use a secure context (https or localhost)');
     }
     var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
     return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
@@ -860,21 +860,21 @@ touched the chain. A report with no AI summary means "not analysed", not
             var claim = report.claims[i];
             var again = byId[claim.id];
             if (!again) {
-              failure = 'Claim ' + claim.id + ' was not reproduced by the re-run.';
+              failure = 'Claim ' + claim.id + ' was not reproduced by the rerun.';
               break;
             }
             if (again.passed !== claim.passed) {
-              failure = 'Claim ' + claim.id + ' passed value differs (report: ' + claim.passed + ', re-run: ' + again.passed + ').';
+              failure = 'Claim ' + claim.id + ' passed value differs (report: ' + claim.passed + ', rerun: ' + again.passed + ').';
               break;
             }
             if (String(again.threshold) !== String(claim.threshold)) {
-              failure = 'Claim ' + claim.id + ' threshold differs (report: ' + claim.threshold + ', re-run: ' + again.threshold + ').';
+              failure = 'Claim ' + claim.id + ' threshold differs (report: ' + claim.threshold + ', rerun: ' + again.threshold + ').';
               break;
             }
             // Legacy reports (pre-P3) carry the exact value: it must
             // match too. Predicate reports carry no value.
             if (claim.value !== undefined && String(again.value) !== String(claim.value)) {
-              failure = 'Claim ' + claim.id + ' value differs (report: ' + claim.value + ', re-run: ' + again.value + ').';
+              failure = 'Claim ' + claim.id + ' value differs (report: ' + claim.value + ', rerun: ' + again.value + ').';
               break;
             }
           }
@@ -889,7 +889,7 @@ touched the chain. A report with no AI summary means "not analysed", not
         }
       }
     } catch (err) {
-      check('claims', false, 'Claim re-run failed: ' + err.message);
+      check('claims', false, 'Claim rerun failed: ' + err.message);
     }
 
     try {
@@ -910,14 +910,14 @@ touched the chain. A report with no AI summary means "not analysed", not
             JSON.stringify(againScore.components) === JSON.stringify(report.score.components);
           scoreDetail = sameScore
             ? 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').'
-            : 'Score differs on re-run (report: ' + report.score.value + ', re-run: ' + againScore.value + ').';
+            : 'Score differs on rerun (report: ' + report.score.value + ', rerun: ' + againScore.value + ').';
         } else {
           sameScore = againScore.version === report.score.version &&
             againScore.band === report.score.band &&
             JSON.stringify(stripPoints(againScore.components)) === JSON.stringify(stripPoints(report.score.components));
           scoreDetail = sameScore
             ? 'Score recomputed from the disclosure snapshot: band ' + againScore.band + ' (matches the public band).'
-            : 'Score band differs on re-run (report band: ' + report.score.band + ', re-run band: ' + againScore.band + ').';
+            : 'Score band differs on rerun (report band: ' + report.score.band + ', rerun band: ' + againScore.band + ').';
         }
         if (sameScore) {
           check('score', true, scoreDetail);
@@ -926,7 +926,7 @@ touched the chain. A report with no AI summary means "not analysed", not
         }
       }
     } catch (err) {
-      check('score', false, 'Score re-run failed: ' + err.message);
+      check('score', false, 'Score rerun failed: ' + err.message);
     }
 
     // g. Every linked wallet proves ownership (transfer or signature).
@@ -1071,7 +1071,7 @@ touched the chain. A report with no AI summary means "not analysed", not
     var ciphertext = base64ToBytes(encryptedPackage.ciphertext, 'ciphertext');
     var shared = nacl.box.before(ephemeralPublicKey, verifierSecretKey);
     var plaintext = nacl.box.open.after(ciphertext, nonce, shared);
-    if (plaintext === null) throw new Error('crypto-box: could not decrypt — wrong verifier key or tampered package');
+    if (plaintext === null) throw new Error('crypto-box: could not decrypt, wrong verifier key or tampered package');
     var parsed = JSON.parse(new TextDecoder().decode(plaintext));
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('crypto-box: decrypted package is not a disclosure package');
     return parsed;
@@ -1186,7 +1186,7 @@ touched the chain. A report with no AI summary means "not analysed", not
 
   function renderCertificate(result, report, disclosurePackage, policy) {
     var banner = el('banner');
-    banner.textContent = result.valid ? 'VALID — this report verifies.' : 'INVALID — this report does not verify.';
+    banner.textContent = result.valid ? 'VALID, this report verifies.' : 'INVALID, this report does not verify.';
     banner.className = 'banner ' + (result.valid ? 'valid' : 'invalid');
     el('checks').innerHTML = result.checks.map(function (c) {
       return '<div class="check ' + (c.passed ? 'pass' : 'fail') + '"><span class="mark">' +
@@ -1196,10 +1196,10 @@ touched the chain. A report with no AI summary means "not analysed", not
     // and bands only, so the table shows Claim / Passed / Threshold.
     // Exact values live only in the private disclosure package and
     // are never displayed here, even to the verifier.
-    var claimsHtml = '<table><tr><th>Claim</th><th>Passed</th><th>Threshold</th></tr>' +
+    var claimsHtml = '<div class="table-scroll"><table><tr><th>Claim</th><th>Passed</th><th>Threshold</th></tr>' +
       report.claims.map(function (c) {
         return '<tr><td>' + esc(c.id) + '</td><td>' + (c.passed ? 'yes' : 'NO') + '</td><td class="mono">' + esc(c.threshold) + '</td></tr>';
-      }).join('') + '</table>';
+      }).join('') + '</table></div>';
     // What was NOT disclosed: claims the re-run finds that the report
     // does not list. The verifier holds the snapshot, so it can see
     // them; the public report never did.
@@ -1223,11 +1223,11 @@ touched the chain. A report with no AI summary means "not analysed", not
     var expires = 'unreadable';
     try { expires = new Date(Number(BigInt(report.expiresAt) / 1000000n)).toISOString(); } catch (e) { /* keep unreadable */ }
     var ai = report.aiSummary === null
-      ? 'Not analysed — no AI summary was attached to this report.'
+      ? 'Not analysed, no AI summary was attached to this report.'
       : 'Attached (see report JSON).';
     el('facts').innerHTML =
       '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
-      '<p>Prover commitment (salted SHA-256 of the wallet address — fresh salt per report, so two reports cannot be matched; the address itself is never shown):<br><span class="mono">' + esc(report.prover) + '</span></p>' +
+      '<p>Prover commitment (salted SHA 256 of the wallet address, fresh salt per report, so two reports cannot be matched; the address itself is never shown):<br><span class="mono">' + esc(report.prover) + '</span></p>' +
       '<p>Policy version: <span class="mono">' + esc(report.policyVersion) + '</span></p>' +
       '<p>Created: <span class="mono">' + esc(report.createdAt) + '</span></p>' +
       '<p>Expires: <span class="mono">' + esc(expires) + '</span></p>' +
@@ -1261,13 +1261,13 @@ touched the chain. A report with no AI summary means "not analysed", not
     if (isEncryptedDisclosurePackage(disclosurePackage)) {
       var secretKey = el('verifierSecretKey').value.trim();
       if (!secretKey) {
-        status.textContent = 'This disclosure package is sealed for one verifier — paste your verifier secret key to open it.';
+        status.textContent = 'This disclosure package is sealed for one verifier, paste your verifier secret key to open it.';
         status.className = 'error';
         return;
       }
       try {
         disclosurePackage = openDisclosurePackage(disclosurePackage, secretKey, (BigInt(Date.now()) * 1000000n).toString());
-        status.textContent = 'Sealed package opened — verifying…';
+        status.textContent = 'Sealed package opened, verifying…';
       } catch (err) {
         status.textContent = 'Could not open the sealed disclosure package: ' + err.message;
         status.className = 'error';
@@ -1284,7 +1284,7 @@ touched the chain. A report with no AI summary means "not analysed", not
       return;
     }
     if (record === null || record === undefined) {
-      status.textContent = 'No onchain record found for report ID ' + reportId + ' — this report was never published (or the ID is wrong).';
+      status.textContent = 'No onchain record found for report ID ' + reportId + ', this report was never published (or the ID is wrong).';
       status.className = 'error';
       return;
     }
@@ -1328,7 +1328,7 @@ touched the chain. A report with no AI summary means "not analysed", not
       }
       var pair = globalThis.nacl.box.keyPair();
       el('verifierSecretKey').value = bytesToBase64(pair.secretKey);
-      out.innerHTML = 'Your <strong>public</strong> key (give this to the prover): <span class="mono">' + esc(bytesToBase64(pair.publicKey)) + '</span><br>Your secret key is filled in above — keep it private, never share it.';
+      out.innerHTML = 'Your <strong>public</strong> key (give this to the prover): <span class="mono">' + esc(bytesToBase64(pair.publicKey)) + '</span><br>Your secret key is filled in above, keep it private, never share it.';
     } catch (err) {
       out.textContent = 'Could not generate a keypair: ' + err.message;
     }
