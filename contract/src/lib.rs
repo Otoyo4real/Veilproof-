@@ -100,6 +100,16 @@ impl Contract {
     /// (the claim record and the owner index), the attached deposit must
     /// cover it, and any excess is refunded to the caller. A panic here
     /// rolls the writes back, so an underfunded publish stores nothing.
+    ///
+    /// NOTE: `#[payable]` is load-bearing here, not decorative. The
+    /// method reads `env::attached_deposit()`, so without it the runtime
+    /// rejects every call carrying a deposit ("method is not payable")
+    /// and a zero-deposit call fails the storage-cost assert — publishing
+    /// is impossible either way. The near-sdk mock does NOT enforce
+    /// payable-ness, so unit tests pass with or without it; the live
+    /// demo publish is the regression check for this attribute. This
+    /// was missing in the first deploy (2026-11-06) and the demo caught it.
+    #[payable]
     pub fn publish_claim(
         &mut self,
         claim_id: String,

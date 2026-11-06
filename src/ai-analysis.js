@@ -58,6 +58,11 @@ export const DEFAULT_MODEL = 'z-ai/glm-5.3-flash';
 export const DEFAULT_BASE_URL = 'https://cloud-api.near.ai/v1';
 
 const MIN_MAX_TOKENS = 800;
+// Default request size. Live evidence 2026-11-06: 800 tokens returned an
+// empty completion for the real demo prompt (the model spends the budget
+// reasoning before answering — the same gotcha as the Genesis worker),
+// while 4000 returned the full JSON summary. The 800 floor stays.
+const DEFAULT_MAX_TOKENS = 4000;
 const MAX_POINTS = 10;
 const MAX_POINT_LEN = 500;
 const ATTESTATION_TIMEOUT_MS = 60_000;
@@ -286,7 +291,7 @@ export async function analyseClaims({ claims, metrics, policyVersion }, opts = {
   }
   const model = opts.model || process.env.VEILPROOF_NEAR_AI_MODEL || DEFAULT_MODEL;
   const base = (opts.baseUrl || process.env.VEILPROOF_NEAR_AI_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
-  const maxTokens = Math.max(MIN_MAX_TOKENS, opts.maxTokens || MIN_MAX_TOKENS);
+  const maxTokens = Math.max(MIN_MAX_TOKENS, opts.maxTokens || DEFAULT_MAX_TOKENS);
 
   // Attestation preflight first (a report fetched after the completion
   // cannot replace preflight evidence). A failed preflight leaves the

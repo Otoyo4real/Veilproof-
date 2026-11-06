@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VeilProof — Prove onchain claims without revealing your wallet</title>
+<title>VeilProof — Prove you&rsquo;re good for it, without handing over your wallet</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #1a1a1a; }
   h1 { font-size: 1.5rem; }
@@ -27,22 +27,23 @@
 </style>
 </head>
 <body>
-<h1>VeilProof — Prove onchain claims without revealing your wallet</h1>
-<p>Prove claims like "balance at least 1 NEAR" about a NEAR testnet wallet,
-without revealing which wallet. The data comes from the chain, so it is
-genuine by definition. Only a hash commitment of your address is ever
-published — the address itself travels only in the private disclosure
-package you hand to the verifier you chose.</p>
+<h1>Prove you&rsquo;re good for it — without handing over your wallet</h1>
+<p>A lender, a deal partner, a grant committee — they all want proof before
+they say yes. Today that proof is your wallet address, and your address is
+your whole financial life: every balance, every transfer, everyone you have
+ever paid. VeilProof changes the deal. You prove the one fact they need —
+you hold at least 1 NEAR, your record is clean — and the world never learns
+which wallet is yours. The facts come from the chain itself, so they cannot
+be faked. Only a hash of your address is ever published; the address itself
+goes only to the verifier you chose, in a private package.</p>
 
 <div class="note">
-<strong>What this page does — and does not do.</strong> Everything on this
-page runs in your browser: the snapshot is fetched from the public NEAR
-testnet RPC, the claims are evaluated locally, and the report is built
-locally. The only thing that leaves your browser besides read-only RPC
-calls is (a) an optional AI analysis request carrying claim-level data
-only — never your address, never transaction hashes — and (b) the signed
-publish transaction, which records only hashes onchain. A report with no
-AI summary means "not analysed", never "verified by AI".
+<strong>Your wallet stays yours.</strong> Everything on this page runs in
+your browser. The chain is read, never written to, until you choose to
+publish — and publishing records only hashes, never your address, never
+amounts, never transactions. The optional AI analysis sees claim-level facts
+only — never your address, never transaction hashes. A report without an AI
+summary says "not analysed", never "verified by AI".
 </div>
 
 <p><a href="verify.html">Verifier portal — check a published report &rarr;</a></p>
