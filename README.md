@@ -56,22 +56,30 @@ score-v1 is 0–1000 from six components, all computed from the disclosed snapsh
 
 ## Status
 
-Built and live. Registry deployed on NEAR testnet, a demo claim published and
-verified onchain (report `86f237c0cf2e3fe6`, publish tx
-`B33bZZ6HU6Y1hzi6i7DgUuxwm1jFPt7tXdaPDcUCiECW`), 77/77 tests green, and the
-live site runs the AI analysis with a real attested summary. Hackathon: NEAR
-Hackathon 2026 (Build Beyond Boundaries), track: Privacy & Private AI.
-Deadline: 14 Nov 2026 23:59 UTC. Testnet only.
+Built and live. Registry deployed on NEAR testnet. The live demo claim is a
+multi-wallet agent treasury proof: report `7c063555730c20fb`, publish tx
+`FD2zjjxcUxTqndCZJojnAm3Lf91ntkfaa7FmLN2r1pKR`, score **790/1000 (solid)**,
+AI underwriting **lend_with_limits, suggested limit 4 NEAR** (about a third
+of the ~12.65 NEAR sustained balance — the model did the arithmetic itself;
+a deterministic guard would have capped it there anyway). All 9 checks pass
+onchain, and the full test suite is green (111/111). The live site runs the AI
+underwriting with a real attested summary. Earlier demo claims
+(`86f237c0cf2e3fe6`, `bf2518ecb0791e4a`, `063feb0181ad5577`) stay valid
+onchain and were superseded, never revoked. Hackathon: NEAR Hackathon 2026
+(Build Beyond Boundaries), tracks: Privacy & Private AI primary, Agent
+Economy second. Deadline: 14 Nov 2026 23:59 UTC. Testnet only.
 
 ## Judge in 10 minutes
 
 1. Open https://veilproof22.vercel.app/verify.html and press
-   **Try the live demo claim** — a real published claim is verified against
-   its onchain record. You should see VALID and all seven checks passing,
-   including the AI summary.
+   **Try the live demo claim** — a real published multi-wallet claim is
+   verified against its onchain record. You should see VALID and all nine
+   checks passing: prover binding (including the linked wallet), hashes,
+   claims, the recomputed score (790, solid), the link proof, and validity
+   — plus the attested underwriting summary.
 2. On the main page, build a report for the demo wallet yourself and press
-   **Analyse** — the AI summary comes back attested (verifiable, nonce
-   matched).
+   **Underwrite with NEAR AI** — the verdict comes back attested
+   (verifiable, nonce matched), advisory only.
 3. Publish the report (demo wallet, testnet) and verify it the same way.
    Then paste a tampered report — the hash checks fail. Revoke it — the
    validity check fails.

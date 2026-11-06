@@ -278,7 +278,33 @@ export function dataHashForSnapshots(snapshots) {
 // Throws when the account did not exist at a sampled height (the
 // account is younger than the window) or the node cannot serve that
 // height — the caller should offer a shorter window then.
-export async function sampleBalanceHistory(accountId, { windowHours, samples }) {
+// Pure helper: the block heights a balance sample covers, newest
+// last. Exported so callers sampling SEVERAL wallets compute the
+// heights ONCE and pass the same list to each — the sustained and
+// time-weighted claims require every wallet's samples to sit on the
+// same heights, and two sequential "current height" reads would drift
+// apart by a block or two.
+export function computeSampleHeights(currentBlockHeight, { windowHours, samples }) {
+  if (!Number.isInteger(currentBlockHeight) || currentBlockHeight < 0) {
+    throw new Error('computeSampleHeights: currentBlockHeight must be a non-negative integer');
+  }
+  if (typeof windowHours !== 'number' || !(windowHours > 0)) {
+    throw new Error('computeSampleHeights: windowHours must be a positive number');
+  }
+  if (!Number.isInteger(samples) || samples < 2) {
+    throw new Error('computeSampleHeights: samples must be an integer >= 2');
+  }
+  const step = Math.max(1, Math.floor((windowHours * 3600) / samples));
+  const heights = [];
+  for (let i = samples - 1; i >= 0; i -= 1) {
+    const height = currentBlockHeight - i * step;
+    if (height < 0) throw new Error('computeSampleHeights: sampled height is negative — window too long for this chain');
+    heights.push(height);
+  }
+  return heights;
+}
+
+export async function sampleBalanceHistory(accountId, { windowHours, samples, heights }) {
   if (typeof accountId !== 'string' || accountId.length === 0) {
     throw new Error('sampleBalanceHistory: accountId must be a non-empty string');
   }
@@ -288,15 +314,19 @@ export async function sampleBalanceHistory(accountId, { windowHours, samples }) 
   if (!Number.isInteger(samples) || samples < 2) {
     throw new Error('sampleBalanceHistory: samples must be an integer >= 2');
   }
-  const current = await getAccount(accountId);
-  const step = Math.max(1, Math.floor((windowHours * 3600) / samples));
-  const heights = [];
-  for (let i = samples - 1; i >= 0; i -= 1) {
-    heights.push(current.blockHeight - i * step);
+  let sampleHeights;
+  if (heights !== undefined) {
+    if (!Array.isArray(heights) || heights.length < 2 || heights.length !== samples
+      || heights.some((h) => !Number.isInteger(h) || h < 0)) {
+      throw new Error('sampleBalanceHistory: heights must be an array of samples non-negative integers');
+    }
+    sampleHeights = heights;
+  } else {
+    const current = await getAccount(accountId);
+    sampleHeights = computeSampleHeights(current.blockHeight, { windowHours, samples });
   }
   const out = [];
-  for (const height of heights) {
-    if (height < 0) throw new Error('sampleBalanceHistory: sampled height is negative — window too long for this chain');
+  for (const height of sampleHeights) {
     const result = await rpcCall('query', {
       request_type: 'view_account',
       account_id: accountId,

@@ -10,6 +10,8 @@ import {
   verifyTx,
   fetchAccountSnapshot,
   computeDataHash,
+  computeSampleHeights,
+  sampleBalanceHistory,
 } from '../src/onchain.js';
 
 // The demo wallet was funded with 10 NEAR at creation, then the demo
@@ -132,4 +134,27 @@ test('fetchAccountSnapshot: unknown hashes are skipped, duplicates collapsed', a
   ]);
   assert.equal(snap.txs.length, 1);
   assert.equal(snap.txs[0].hash, REAL_TX_HASH);
+});
+
+test('computeSampleHeights: deterministic spacing, newest last', () => {
+  assert.deepEqual(computeSampleHeights(100000, { windowHours: 1, samples: 4 }), [97300, 98200, 99100, 100000]);
+  assert.deepEqual(computeSampleHeights(100000, { windowHours: 0.5, samples: 4 }), [98650, 99100, 99550, 100000]);
+  assert.throws(() => computeSampleHeights(100, { windowHours: 24, samples: 4 }), /negative/);
+  assert.throws(() => computeSampleHeights(100000, { windowHours: 0, samples: 4 }), /windowHours/);
+  assert.throws(() => computeSampleHeights(100000, { windowHours: 1, samples: 1 }), /samples/);
+});
+
+// The linked demo wallet (demo2.veilproof.testnet) is young: a 15-minute
+// window's oldest sample is ~11 minutes back, safely after its creation.
+// Explicit heights are the point of this test — two wallets sampled at
+// the same heights must come back with identical blockHeight arrays,
+// or the sustained/time-weighted claims refuse to run.
+test('sampleBalanceHistory: explicit heights align across two wallets', async () => {
+  const primary = await getAccount(DEMO_ACCOUNT);
+  const heights = computeSampleHeights(primary.blockHeight, { windowHours: 0.25, samples: 4 });
+  const a = await sampleBalanceHistory(DEMO_ACCOUNT, { windowHours: 0.25, samples: 4, heights });
+  const b = await sampleBalanceHistory('demo2.veilproof.testnet', { windowHours: 0.25, samples: 4, heights });
+  assert.deepEqual(a.map((s) => s.blockHeight), heights);
+  assert.deepEqual(b.map((s) => s.blockHeight), heights);
+  assert.ok(BigInt(b[3].amount) > 0n, 'linked wallet balance should be positive');
 });

@@ -420,6 +420,14 @@ async function fetchSnapshot() {
     // lines in the box whose sender is that wallet. The link transfer
     // must verify as a successful transfer to the primary address —
     // that is the ownership proof for the linked wallet.
+    // Balance samples for linked wallets reuse the PRIMARY snapshot's
+    // exact sample heights: the sustained/time-weighted claims refuse
+    // to run when wallets were sampled at different heights, and two
+    // sequential "current height" reads would drift apart by a block.
+    const linkedSampleOpts =
+      sampleHours > 0 && snapshot.balanceSamples
+        ? { balanceSamples: { windowHours: sampleHours, samples: 4, heights: snapshot.balanceSamples.map((s) => s.blockHeight) } }
+        : sampleOpts;
     for (let i = 0; i < linkedAddresses.length; i += 1) {
       const linkedAddress = linkedAddresses[i];
       const linkTxHash = linkHashes[i];
@@ -427,7 +435,7 @@ async function fetchSnapshot() {
       if (!walletEntries.some((e) => e.hash === linkTxHash)) {
         walletEntries.push({ hash: linkTxHash, senderId: linkedAddress });
       }
-      const linkedSnapshot = await fetchAccountSnapshot(linkedAddress, walletEntries, sampleOpts);
+      const linkedSnapshot = await fetchAccountSnapshot(linkedAddress, walletEntries, linkedSampleOpts);
       const linkTx = linkedSnapshot.txs.find((t) => t.hash === linkTxHash);
       if (!linkTx || linkTx.senderId !== linkedAddress || linkTx.receiverId !== address || linkTx.status !== 'Success') {
         throw new Error(`Link transfer for ${linkedAddress} did not verify as a successful transfer to ${address}.`);

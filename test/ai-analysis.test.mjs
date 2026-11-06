@@ -387,6 +387,44 @@ test('underwriting: deterministic guard turns lend into decline on a thin score'
   assert.match(result.summary.points[0], /Deterministic guard/);
 });
 
+// The model suggested 1500 NEAR against a ~12.14 NEAR sustained
+// balance: the guard caps the limit at what was demonstrably held
+// (floored to 2 decimals) and says so, without changing the verdict.
+test('underwriting: deterministic guard caps a suggested limit at the sustained balance', async () => {
+  const bigLimit = JSON.stringify({
+    verdict: 'lend_with_limits',
+    suggestedLimitNear: 1500,
+    confidence: 'medium',
+    points: ['Solid score, but activity is concentrated in one week.'],
+  });
+  const claims = [
+    ...CLAIMS,
+    { id: 'sustained_balance_at_least', passed: true, value: '12149000000000000000000000', threshold: '10000000000000000000000000' },
+  ];
+  const { fetchImpl } = makeMockFetch({ completionContent: bigLimit });
+  const result = await withApiKey('test-key', () =>
+    analyseUnderwriting({ claims, metrics: METRICS, score: SCORE, policyVersion: POLICY_VERSION }, { fetchImpl }));
+  assert.equal(result.status, 'ok');
+  assert.equal(result.summary.verdict, 'lend_with_limits');
+  assert.equal(result.summary.suggestedLimitNear, 12.14);
+  assert.match(result.summary.points[0], /Deterministic guard: suggested limit capped at the sustained balance of 12.14 NEAR/);
+});
+
+// A limit below the sustained balance passes through untouched.
+test('underwriting: suggested limit below the sustained balance is not capped', async () => {
+  const claims = [
+    ...CLAIMS,
+    { id: 'sustained_balance_at_least', passed: true, value: '12149000000000000000000000', threshold: '10000000000000000000000000' },
+  ];
+  const { fetchImpl } = makeMockFetch({ completionContent: UNDERWRITE_CONTENT });
+  const result = await withApiKey('test-key', () =>
+    analyseUnderwriting({ claims, metrics: METRICS, score: SCORE, policyVersion: POLICY_VERSION }, { fetchImpl }));
+  assert.equal(result.status, 'ok');
+  assert.equal(result.summary.verdict, 'lend');
+  assert.equal(result.summary.suggestedLimitNear, 5);
+  assert.equal(result.summary.points[0], 'Strong sustained balance with clean history.');
+});
+
 test('underwriting: no key -> not_configured, summary null', async () => {
   const { fetchImpl } = makeMockFetch({ completionContent: UNDERWRITE_CONTENT });
   const result = await withApiKey(undefined, () =>

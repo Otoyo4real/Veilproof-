@@ -4,5 +4,12 @@
   "txWindowDays": 30,
   "minVolumeYocto": "1000000000000000000000000",
   "volumeWindowDays": 30,
-  "noFailedWindowDays": 30
+  "noFailedWindowDays": 30,
+  "aggregateBalanceAtLeastYocto": "10000000000000000000000000",
+  "aggregateMinTxCount": 5,
+  "aggregateTxWindowDays": 30,
+  "aggregateMinVolumeYocto": "2000000000000000000000000",
+  "aggregateVolumeWindowDays": 30,
+  "sustainedBalanceAtLeastYocto": "10000000000000000000000000",
+  "timeWeightedBalanceAtLeastYocto": "10000000000000000000000000"
 }

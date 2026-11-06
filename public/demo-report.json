@@ -1,24 +1,27 @@
 {
-  "reportId": "86f237c0cf2e3fe6",
+  "reportId": "7c063555730c20fb",
   "prover": "f951fcc0b515ddbee32eb992a50cbc3e9a2c08747996c5098b363990d8c6620e",
-  "createdAt": "2026-11-06T12:03:45.607Z",
+  "linkedProvers": [
+    "be743e7bfb5ae52e1f032effa1bab6bdaa80d251fd27bb2abce3222faaa42ecc"
+  ],
+  "createdAt": "2026-11-06T13:53:55.944Z",
   "claims": [
     {
       "id": "balance_at_least",
       "passed": true,
-      "value": "10649333866636796000000000",
+      "value": "11148559588068656800000000",
       "threshold": "5000000000000000000000000"
     },
     {
       "id": "tx_count_in_window",
       "passed": true,
-      "value": 4,
+      "value": 5,
       "threshold": 30
     },
     {
       "id": "volume_in_window",
       "passed": true,
-      "value": "1850000000000000000000000",
+      "value": "2350000000000000000000000",
       "threshold": 30
     },
     {
@@ -26,35 +29,123 @@
       "passed": true,
       "value": 0,
       "threshold": 30
+    },
+    {
+      "id": "aggregate_balance_at_least",
+      "passed": true,
+      "value": "12648514951556156800000000",
+      "threshold": "10000000000000000000000000"
+    },
+    {
+      "id": "aggregate_tx_count_in_window",
+      "passed": true,
+      "value": 5,
+      "threshold": 30
+    },
+    {
+      "id": "aggregate_volume_in_window",
+      "passed": true,
+      "value": "2350000000000000000000000",
+      "threshold": 30
+    },
+    {
+      "id": "sustained_balance_at_least",
+      "passed": true,
+      "value": "12648514951556156800000000",
+      "threshold": "10000000000000000000000000"
+    },
+    {
+      "id": "time_weighted_balance_at_least",
+      "passed": true,
+      "value": "12648902525774826700000000",
+      "threshold": "10000000000000000000000000"
     }
   ],
-  "policyVersion": "veilproof-policy-v1",
+  "policyVersion": "veilproof-policy-v2",
   "aiSummary": {
     "provider": "near-ai",
     "model": "z-ai/glm-5.3-flash",
-    "verdict": "consistent",
+    "role": "underwriting",
+    "verdict": "lend_with_limits",
+    "suggestedLimitNear": 4,
+    "confidence": "medium",
     "points": [
-      "balance_at_least passed=true is consistent: balanceYocto 10649333866636796000000000 is at or above the threshold 5000000000000000000000000, and the claim value matches the metric.",
-      "tx_count_in_window passed=true is consistent: claim value 4 matches txCount 4, the 30-day window matches txWindowDays, and a nonzero transaction count supports a passing claim.",
-      "volume_in_window passed=true is consistent: claim value matches volumeYocto, the 30-day window matches volumeWindowDays, and positive volume supports a passing claim.",
-      "no_failed_txs_in_window passed=true is consistent: failedTxCount is 0 as required, and the 30-day window matches noFailedWindowDays.",
-      "Internal metric coherence holds: successTxCount 4 plus failedTxCount 0 equals txCount 4, and all metrics needed to check the claims are present."
+      "Score 790 (solid band) with all nine claims passing and no failures.",
+      "Balance components are strong and fully measured: sustained and time-weighted balances both around 12.65 NEAR, so the balance does not look like a flash deposit.",
+      "Activity is the weak spot: only 5 successful transactions in 30 days scored 90/200, so the history is light and possibly bursty rather than sustained use.",
+      "Volume is modest at about 2.35 NEAR (100/150) and staked balance is zero (0/50), leaving no additional skin in the game.",
+      "Clean record with zero failed transactions in the 30-day window.",
+      "Suggested limit of 4 NEAR is roughly a third of the demonstrated sustained balance, keeping exposure well below what the agent actually held."
     ],
     "attestation": {
       "verifiable": true,
       "nonceMatched": true,
-      "ref": "0aac1ff60584ca100f0e26a4714e8b0e4de659d8b4d0144fb7861239ebf77665"
+      "ref": "8b17c3d343cfa8bf244ee6416ad86bba8afc81b76f8362490addec1d99fca313"
     }
   },
   "evidenceRefs": {
-    "attestationRef": "0aac1ff60584ca100f0e26a4714e8b0e4de659d8b4d0144fb7861239ebf77665",
-    "dataHash": "277b11a9224e20956c1a67b7e2d310bbbbb77738bab098d59a7457dc75e17b00"
+    "attestationRef": "8b17c3d343cfa8bf244ee6416ad86bba8afc81b76f8362490addec1d99fca313",
+    "dataHash": "66316466523aa994ee44b7a036ac49cdfba84b14b85027e099c37ca672693a2e"
   },
-  "expiresAt": "1796558625000000000",
+  "expiresAt": "1796565235000000000",
   "disclosed": [
     "balance_at_least",
     "tx_count_in_window",
     "volume_in_window",
-    "no_failed_txs_in_window"
-  ]
+    "no_failed_txs_in_window",
+    "aggregate_balance_at_least",
+    "aggregate_tx_count_in_window",
+    "aggregate_volume_in_window",
+    "sustained_balance_at_least",
+    "time_weighted_balance_at_least"
+  ],
+  "score": {
+    "version": "score-v1",
+    "value": 790,
+    "band": "solid",
+    "components": [
+      {
+        "id": "sustained_balance",
+        "label": "Lowest sampled balance held",
+        "points": 300,
+        "max": 300,
+        "measured": true
+      },
+      {
+        "id": "time_weighted_balance",
+        "label": "Average sampled balance",
+        "points": 200,
+        "max": 200,
+        "measured": true
+      },
+      {
+        "id": "activity",
+        "label": "Successful transactions and week spread",
+        "points": 90,
+        "max": 200,
+        "measured": true
+      },
+      {
+        "id": "volume",
+        "label": "Volume in window",
+        "points": 100,
+        "max": 150,
+        "measured": true
+      },
+      {
+        "id": "no_failed",
+        "label": "No failed transactions in window",
+        "points": 100,
+        "max": 100,
+        "measured": true
+      },
+      {
+        "id": "staked",
+        "label": "Staked balance held",
+        "points": 0,
+        "max": 50,
+        "measured": true
+      }
+    ]
+  }
 }

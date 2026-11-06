@@ -134,6 +134,13 @@ test('claims engine parity: evaluateClaims and each claim fn', () => {
   );
 });
 
+test('computeSampleHeights parity (browser vs Node)', () => {
+  const heights = [97300, 98200, 99100, 100000];
+  assert.deepEqual(nodeOnchain.computeSampleHeights(100000, { windowHours: 1, samples: 4 }), heights);
+  assert.deepEqual(browserOnchain.computeSampleHeights(100000, { windowHours: 1, samples: 4 }), heights);
+  assert.throws(() => browserOnchain.computeSampleHeights(100, { windowHours: 24, samples: 4 }), /negative/);
+});
+
 test('computeDataHash parity (browser async vs Node sync)', async () => {
   const browserHash = await browserOnchain.computeDataHash(
     'alice.testnet',

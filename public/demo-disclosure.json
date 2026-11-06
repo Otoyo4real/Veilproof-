@@ -1,14 +1,14 @@
 {
   "address": "veilproof-demo.testnet",
-  "dataHash": "277b11a9224e20956c1a67b7e2d310bbbbb77738bab098d59a7457dc75e17b00",
-  "reportId": "86f237c0cf2e3fe6",
+  "dataHash": "52758ccd3759c4b38d811207e0255f37c1da030d5be2bd196eb3d42b3efc86a7",
+  "reportId": "7c063555730c20fb",
   "snapshot": {
     "account": {
       "accountId": "veilproof-demo.testnet",
-      "amount": "10649333866636796000000000",
+      "amount": "11148559588068656800000000",
       "locked": "0",
       "storage_usage": 182,
-      "blockHeight": 276484292
+      "blockHeight": 276495025
     },
     "txs": [
       {
@@ -30,6 +30,15 @@
         "blockTimestampNs": "1793959396920182737"
       },
       {
+        "hash": "DNYq6teYhtgPfoBijzkNLENHuAatFzX5BNfZd1366DaN",
+        "senderId": "demo2.veilproof.testnet",
+        "receiverId": "veilproof-demo.testnet",
+        "amountYocto": "500000000000000000000000",
+        "status": "Success",
+        "blockHeight": 276491628,
+        "blockTimestampNs": "1793971079285340576"
+      },
+      {
         "hash": "EQeaPK7R7nzT14a6e5kc685Yug45LDMxP4K7YhTxYn9g",
         "senderId": "veilproof.testnet",
         "receiverId": "veilproof-demo.testnet",
@@ -48,7 +57,73 @@
         "blockTimestampNs": "1793959408841161770"
       }
     ],
-    "blockHeight": 276484292,
-    "dataHash": "277b11a9224e20956c1a67b7e2d310bbbbb77738bab098d59a7457dc75e17b00"
-  }
+    "blockHeight": 276495025,
+    "balanceSamples": [
+      {
+        "blockHeight": 276492384,
+        "amount": "11149076353693550000000000"
+      },
+      {
+        "blockHeight": 276493284,
+        "amount": "11149076353693550000000000"
+      },
+      {
+        "blockHeight": 276494184,
+        "amount": "11149076353693550000000000"
+      },
+      {
+        "blockHeight": 276495084,
+        "amount": "11148559588068656800000000"
+      }
+    ],
+    "balanceSampleWindowHours": 1,
+    "dataHash": "52758ccd3759c4b38d811207e0255f37c1da030d5be2bd196eb3d42b3efc86a7"
+  },
+  "linked": [
+    {
+      "address": "demo2.veilproof.testnet",
+      "linkTxHash": "DNYq6teYhtgPfoBijzkNLENHuAatFzX5BNfZd1366DaN",
+      "snapshot": {
+        "account": {
+          "accountId": "demo2.veilproof.testnet",
+          "amount": "1499955363487500000000000",
+          "locked": "0",
+          "storage_usage": 182,
+          "blockHeight": 276495109
+        },
+        "txs": [
+          {
+            "hash": "DNYq6teYhtgPfoBijzkNLENHuAatFzX5BNfZd1366DaN",
+            "senderId": "demo2.veilproof.testnet",
+            "receiverId": "veilproof-demo.testnet",
+            "amountYocto": "500000000000000000000000",
+            "status": "Success",
+            "blockHeight": 276491628,
+            "blockTimestampNs": "1793971079285340576"
+          }
+        ],
+        "blockHeight": 276495109,
+        "balanceSamples": [
+          {
+            "blockHeight": 276492384,
+            "amount": "1499955363487500000000000"
+          },
+          {
+            "blockHeight": 276493284,
+            "amount": "1499955363487500000000000"
+          },
+          {
+            "blockHeight": 276494184,
+            "amount": "1499955363487500000000000"
+          },
+          {
+            "blockHeight": 276495084,
+            "amount": "1499955363487500000000000"
+          }
+        ],
+        "balanceSampleWindowHours": 1,
+        "dataHash": "8c175155f95b3ea97b4b5d36893aa169d0711c83a63dbe9c61d1092233c874db"
+      }
+    }
+  ]
 }

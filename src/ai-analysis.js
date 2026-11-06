@@ -281,6 +281,8 @@ export function buildUnderwritingPromptMessages(claims, metrics, score, policyVe
         + 'Your job is a RISK JUDGMENT, not a verification: given the score, which components are strong or weak, whether the activity looks sustained or bursty, and whether any claim failed, would you lend to this agent? '
         + 'The score is a fact computed by deterministic code; treat it as the anchor, but weigh the components: a high score built only on a big balance with no activity history is weaker than a balanced score, and a low sustained-balance component means the balance may be a flash deposit. '
         + 'Do NOT verify anything about any blockchain, wallet, or transaction: chain data is verified separately by deterministic code, not by you. Do NOT invent facts, amounts, or identities. '
+        + 'Amounts in your input are in yoctoNEAR unless labelled otherwise: 1 NEAR = 10^24 yoctoNEAR, so divide by 10^24 to get NEAR — a claim value of 12648773761926773600000000 yoctoNEAR is about 12.65 NEAR, not millions. '
+        + 'Ground suggestedLimitNear in the measured balances in your input: it must never exceed the sustained balance — the lowest sampled balance, from the sustained_balance_at_least claim value when present, otherwise the aggregate or primary balance claim — because a limit above what the agent demonstrably held is not cautious, it is invented. A prudent limit is a fraction of what was actually held, not a multiple of it. '
         + 'Reply with JSON ONLY, no other text, in exactly this shape: {"verdict": "lend" | "lend_with_limits" | "decline", "suggestedLimitNear": <number or null>, "confidence": "low" | "medium" | "high", "points": ["one short sentence per observation"]}. '
         + 'Use "lend" only for a strong, balanced profile. Use "lend_with_limits" when the profile is decent but a component is weak or unmeasured, and set suggestedLimitNear to a cautious amount in NEAR (or null when you cannot judge an amount). Use "decline" when the score is thin, a claim failed, or the history looks gamed or too short to judge.',
     },
@@ -486,15 +488,37 @@ export async function analyseClaims({ claims, metrics, policyVersion }, opts = {
 }
 
 // Deterministic underwriting guard (tighten only): a thin score
-// cannot support a lend, however the model weighed the facts.
+// cannot support a lend, however the model weighed the facts, and a
+// suggested limit can never exceed what the agent demonstrably held.
 // Returns the (possibly tightened) verdict object. Exported so the
 // publish script applies exactly the same rule as the module.
-export function applyUnderwritingGuard(parsed, score) {
+// claims is optional: when given, the limit cap comes from the
+// sustained balance claim, falling back to the aggregate balance
+// claim, then the primary balance claim; without a balance claim
+// there is nothing to cap against and the model's limit stands.
+export function applyUnderwritingGuard(parsed, score, claims = []) {
   let { verdict, suggestedLimitNear, confidence, points } = parsed;
   if (verdict === 'lend' && score.value < 300) {
     verdict = 'decline';
     suggestedLimitNear = null;
     points = [`Deterministic guard: score ${score.value} (thin) cannot support a lend verdict.`, ...points];
+  }
+  if (typeof suggestedLimitNear === 'number' && Number.isFinite(suggestedLimitNear)) {
+    // Priority order, not array order: the sustained balance is the
+    // strongest grounding, then the aggregate, then the primary.
+    const list = Array.isArray(claims) ? claims : [];
+    const capClaim = ['sustained_balance_at_least', 'aggregate_balance_at_least', 'balance_at_least']
+      .map((id) => list.find((c) => c?.id === id && typeof c.value === 'string' && /^\d+$/.test(c.value)))
+      .find(Boolean);
+    if (capClaim) {
+      // Cap in NEAR, floored to 2 decimals: a limit above what the
+      // agent demonstrably held is invented, however the model got there.
+      const cap = Number((BigInt(capClaim.value) * 100n) / 10n ** 24n) / 100;
+      if (suggestedLimitNear > cap) {
+        suggestedLimitNear = cap;
+        points = [`Deterministic guard: suggested limit capped at the sustained balance of ${cap} NEAR.`, ...points];
+      }
+    }
   }
   return { verdict, suggestedLimitNear, confidence, points };
 }
@@ -541,8 +565,11 @@ export async function analyseUnderwriting({ claims, metrics, score, policyVersio
   }
 
   // Deterministic guard: a thin score cannot support a lend, however
-  // the model weighed the facts. This can only tighten the verdict.
-  const { verdict, suggestedLimitNear, confidence, points } = applyUnderwritingGuard(parsed, cleanScore);
+  // the model weighed the facts, and a suggested limit can never
+  // exceed what the agent demonstrably held. This can only tighten
+  // the verdict. The guard reads the SANITISED claims, so the cap
+  // comes from the same values the model was shown.
+  const { verdict, suggestedLimitNear, confidence, points } = applyUnderwritingGuard(parsed, cleanScore, cleanClaims);
 
   return {
     status: 'ok',

@@ -162,7 +162,12 @@ let lastSampleError = null;
 for (const windowHours of SAMPLE_WINDOWS_HOURS) {
   try {
     primary = await fetchAccountSnapshot(DEMO_ACCOUNT, entries, { balanceSamples: { windowHours, samples: SAMPLE_COUNT } });
-    linked = await fetchAccountSnapshot(LINKED_ACCOUNT, [{ hash: LINK_TX_HASH, senderId: LINKED_ACCOUNT }], { balanceSamples: { windowHours, samples: SAMPLE_COUNT } });
+    // The linked wallet reuses the PRIMARY's exact sample heights:
+    // the sustained/time-weighted claims refuse to run when wallets
+    // were sampled at different heights, and two sequential "current
+    // height" reads drift apart by a block.
+    const heights = primary.balanceSamples.map((s) => s.blockHeight);
+    linked = await fetchAccountSnapshot(LINKED_ACCOUNT, [{ hash: LINK_TX_HASH, senderId: LINKED_ACCOUNT }], { balanceSamples: { windowHours, samples: SAMPLE_COUNT, heights } });
     sampleWindowUsed = windowHours;
     break;
   } catch (err) {
@@ -220,7 +225,7 @@ const mdlEcho = ((att.model_attestations || [])[0] || {}).request_nonce === nonc
 if (!gwEcho && !mdlEcho) fail('attestation nonce did not echo — refusing to attach unattested evidence');
 const parsed = parseUnderwritingOutput(aiOut.output);
 if (!parsed) fail('model output did not parse as an underwriting verdict');
-const guarded = applyUnderwritingGuard(parsed, score);
+const guarded = applyUnderwritingGuard(parsed, score, evaluation.claims);
 const attRef = createHash('sha256')
   .update(canonicalJson({ nonce, gateway: att.gateway_attestation, models: att.model_attestations }), 'utf8')
   .digest('hex');
