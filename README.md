@@ -87,6 +87,12 @@ Testnet only.
 3. Publish the report (demo wallet, testnet) and verify it the same way.
    Then paste a tampered report — the hash checks fail. Revoke it — the
    validity check fails.
+4. Seal a disclosure package for one verifier: on the main page, after
+   building a report, paste a verifier's encryption public key and press
+   **Encrypt disclosure for this verifier** — only that verifier can
+   open it, and it expires with the report. On the verify page, paste
+   the sealed package and your verifier secret key (or generate a
+   keypair there first). See `docs/verifier-bound-disclosure.md`.
 
 Do X, see Y. Nothing is faked: every check above runs against the live
 testnet registry, and a failed check says so.

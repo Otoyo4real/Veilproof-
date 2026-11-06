@@ -92,15 +92,24 @@ The balance estimator now reads the claim threshold (1 NEAR) instead of the exac
 
 New live demo claim `b05bf4684960ee83`, publish tx `3ouNst9DcYkcptEpua7EzqdLDmuY8P8uFsKRgU9TW9PQ` (script `scripts/publish-demo-claim.mjs`, salts + predicate format). The audit's live-claim line now reads: dictionary recovery **no**, exact balance visible **no**, exact score visible **no**. The old claim `a41d9faaa0a19148` stays valid onchain, superseded, never revoked. The landing-page mock report and README now show the new claim in predicate form (Pass + threshold, band only).
 
-## Results — AFTER (to be filled when P4 lands)
+## Results — AFTER P4 (public report unchanged; disclosure package sealed)
+
+P4 (verifier-bound disclosure, `docs/verifier-bound-disclosure.md`)
+seals the disclosure package for one verifier. It does not change the
+public report, so the audit numbers are the same as after P3 — the
+audit's attacker sees only public data, and P4 leaves the public
+report untouched. What P4 changes is the assumption the audit makes
+about the disclosure package: before P4 it was a social rule that the
+package reaches only the intended verifier; P4 enforces it
+cryptographically. Run `npm run audit` to reproduce the table.
 
 | Attack | Result | Chance / baseline | Verdict |
 | --- | --- | --- | --- |
-| (a) Address recovery (dictionary) | _pending_ | — | _pending_ |
-| (b) Linking via prover commitment | _pending_ | chance 1.0% | _pending_ |
-| (b) Linking via registry owner field | _pending_ | chance 1.0% | documented limit |
-| (c) Balance estimate error (mean) | _pending_ | exact = 0% | _pending_ |
-| (c) Score estimate error (mean) | _pending_ | exact = 0% | _pending_ |
+| (a) Address recovery (dictionary) | 0/50 recovered | chance 0% | **PASS** |
+| (b) Linking via prover commitment | no clusters above chance | chance 1.0% | **PASS** |
+| (b) Linking via registry owner field | 100% linked | chance 1.0% | documented limit |
+| (c) Balance estimate error (mean) | 94.04% | exact = 0% | **PASS** |
+| (c) Score estimate error (mean) | 6.22% | exact = 0% | **PASS** |
 
 ## How to run it
 

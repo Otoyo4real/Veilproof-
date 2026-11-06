@@ -67,6 +67,15 @@ touched the chain. A report with no AI summary means "not analysed", not
   <label>Disclosure package JSON
   <textarea id="disclosureJson" placeholder='{"reportId": "...", "address": "...", "snapshot": {...}, "dataHash": "..."}'></textarea>
   </label>
+  <p class="muted">Sealed package? If the prover sent you an <em>encrypted</em> disclosure (version <span class="mono">veilproof-encrypted-disclosure-v1</span>), paste it here and put your verifier secret key below — the page opens it locally, in your browser, and rejects it if it has expired. Nothing is sent anywhere.</p>
+  <p>
+    <button id="genVerifierKeyBtn" type="button">Generate verifier keypair</button>
+    <span id="verifierKeyOut" class="muted"></span>
+  </p>
+  <label>Your verifier secret key (base64 — only needed for a sealed package; never share it)
+  <input id="verifierSecretKey" type="password" autocomplete="off" spellcheck="false" placeholder="Base64 Curve25519 secret key">
+  </label>
+  <p class="muted">Give the prover your <strong>public</strong> key (shown after generating) — never the secret key above.</p>
 </section>
 
 <section class="card">
@@ -1003,8 +1012,70 @@ touched the chain. A report with no AI summary means "not analysed", not
     computeDataHash: computeDataHash,
     evaluateClaims: evaluateClaims,
     verifyReport: verifyReport,
+    isEncryptedDisclosurePackage: isEncryptedDisclosurePackage,
+    openDisclosurePackage: openDisclosurePackage,
   };
   if (typeof window !== 'undefined') window.VeilProofVerify = api;
+
+  // --- Verifier-bound disclosure (P4), inline copy of src/crypto-box.js ---
+  // The verifier page can open a sealed disclosure package. The seal is
+  // an ephemeral-key nacl.box (sealed-box construction) to the verifier's
+  // Curve25519 public key; only the verifier's secret key opens it, and
+  // an expired package is rejected before decrypting. This is the same
+  // logic as src/crypto-box.js and public/js/crypto-box.js — the three
+  // copies must stay in sync, and the parity test in
+  // test/verify-report.test.mjs covers the verifier logic; the crypto-box
+  // parity test in test/frontend-parity.test.mjs covers the Node and
+  // browser-module copies.
+  var ENCRYPTED_DISCLOSURE_VERSION = 'veilproof-encrypted-disclosure-v1';
+  function bytesToBase64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+  function base64ToBytes(str, what) {
+    if (typeof str !== 'string' || str.length === 0) throw new Error('crypto-box: ' + what + ' must be a non-empty base64 string');
+    var s = atob(str);
+    var out = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+  function isEncryptedDisclosurePackage(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value) &&
+      value.version === ENCRYPTED_DISCLOSURE_VERSION &&
+      typeof value.ephemeralPublicKey === 'string' &&
+      typeof value.nonce === 'string' &&
+      typeof value.ciphertext === 'string' &&
+      typeof value.expiresAt === 'string';
+  }
+  function openDisclosurePackage(encryptedPackage, verifierSecretKeyBase64, nowNs) {
+    if (!encryptedPackage || typeof encryptedPackage !== 'object' || Array.isArray(encryptedPackage)) {
+      throw new Error('crypto-box: encrypted package must be an object');
+    }
+    if (encryptedPackage.version !== ENCRYPTED_DISCLOSURE_VERSION) {
+      throw new Error('crypto-box: unsupported encrypted package version ' + JSON.stringify(encryptedPackage.version));
+    }
+    var now = BigInt(nowNs);
+    var expires = BigInt(encryptedPackage.expiresAt);
+    if (expires <= now) throw new Error('crypto-box: disclosure package expired');
+    if (!globalThis.nacl || !globalThis.nacl.box || typeof globalThis.nacl.box.before !== 'function') {
+      throw new Error('crypto-box: tweetnacl (nacl.min.js) is not loaded');
+    }
+    var nacl = globalThis.nacl;
+    var verifierSecretKey = base64ToBytes(verifierSecretKeyBase64, 'verifier secret key');
+    if (verifierSecretKey.length !== nacl.box.publicKeyLength) throw new Error('crypto-box: verifier secret key must be a 32-byte Curve25519 key');
+    var ephemeralPublicKey = base64ToBytes(encryptedPackage.ephemeralPublicKey, 'ephemeral public key');
+    if (ephemeralPublicKey.length !== nacl.box.publicKeyLength) throw new Error('crypto-box: ephemeral public key must be a 32-byte Curve25519 key');
+    var nonce = base64ToBytes(encryptedPackage.nonce, 'nonce');
+    if (nonce.length !== nacl.box.nonceLength) throw new Error('crypto-box: nonce must be ' + nacl.box.nonceLength + ' bytes');
+    var ciphertext = base64ToBytes(encryptedPackage.ciphertext, 'ciphertext');
+    var shared = nacl.box.before(ephemeralPublicKey, verifierSecretKey);
+    var plaintext = nacl.box.open.after(ciphertext, nonce, shared);
+    if (plaintext === null) throw new Error('crypto-box: could not decrypt — wrong verifier key or tampered package');
+    var parsed = JSON.parse(new TextDecoder().decode(plaintext));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('crypto-box: decrypted package is not a disclosure package');
+    return parsed;
+  }
 
   // ================================================================
   // UI — runs only in a real browser.
@@ -1065,6 +1136,30 @@ touched the chain. A report with no AI summary means "not analysed", not
   // against the chain's access key list. The binding map is passed to
   // verifyReport, which fails the link_proofs check when a signature
   // link has no verified binding (it never trusts the key in the
+  // disclosure package alone). Transfer-linked wallets need no
+  // binding: the transfer itself is the proof.
+  async function fetchLinkKeyBindings(disclosurePackage) {
+    var bindings = {};
+    var linked = Array.isArray(disclosurePackage.linked) ? disclosurePackage.linked : [];
+    for (var i = 0; i < linked.length; i++) {
+      var entry = linked[i];
+      if (!entry || !entry.linkSignature || typeof entry.linkSignature !== 'object') continue;
+      var keys = await rpcAccessKeyList(entry.address);
+      var publicKey = entry.linkSignature.publicKey;
+      var found = false;
+      for (var k = 0; k < keys.length; k++) {
+        if (keys[k].public_key === publicKey) { found = true; break; }
+      }
+      if (found) bindings[entry.address] = publicKey;
+    }
+    return bindings;
+  }
+
+  function el(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   // disclosure package alone). Transfer-linked wallets need no
   // binding: the transfer itself is the proof.
   async function fetchLinkKeyBindings(disclosurePackage) {
@@ -1161,6 +1256,24 @@ touched the chain. A report with no AI summary means "not analysed", not
       status.className = 'error';
       return;
     }
+    // P4: a sealed disclosure package opens here, in the browser, with
+    // the verifier's secret key — and only if it has not expired.
+    if (isEncryptedDisclosurePackage(disclosurePackage)) {
+      var secretKey = el('verifierSecretKey').value.trim();
+      if (!secretKey) {
+        status.textContent = 'This disclosure package is sealed for one verifier — paste your verifier secret key to open it.';
+        status.className = 'error';
+        return;
+      }
+      try {
+        disclosurePackage = openDisclosurePackage(disclosurePackage, secretKey, (BigInt(Date.now()) * 1000000n).toString());
+        status.textContent = 'Sealed package opened — verifying…';
+      } catch (err) {
+        status.textContent = 'Could not open the sealed disclosure package: ' + err.message;
+        status.className = 'error';
+        return;
+      }
+    }
     status.textContent = 'Fetching the onchain record…';
     var record;
     try {
@@ -1207,6 +1320,19 @@ touched the chain. A report with no AI summary means "not analysed", not
     }
   }
   el('verifyBtn').addEventListener('click', runVerification);
+  el('genVerifierKeyBtn').addEventListener('click', function () {
+    var out = el('verifierKeyOut');
+    try {
+      if (!globalThis.nacl || !globalThis.nacl.box || typeof globalThis.nacl.box.keyPair !== 'function') {
+        throw new Error('tweetnacl (nacl.min.js) is not loaded');
+      }
+      var pair = globalThis.nacl.box.keyPair();
+      el('verifierSecretKey').value = bytesToBase64(pair.secretKey);
+      out.innerHTML = 'Your <strong>public</strong> key (give this to the prover): <span class="mono">' + esc(bytesToBase64(pair.publicKey)) + '</span><br>Your secret key is filled in above — keep it private, never share it.';
+    } catch (err) {
+      out.textContent = 'Could not generate a keypair: ' + err.message;
+    }
+  });
   el('demoBtn').addEventListener('click', async function () {
     var demoStatus = el('demoStatus');
     demoStatus.textContent = 'Loading the live demo claim…';

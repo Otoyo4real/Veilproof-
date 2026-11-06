@@ -335,3 +335,39 @@ test('salt parity: browser and Node salted commitments agree', async () => {
   assert.throws(() => nodeDisclosure.assertPublicReportClean(leaked, 'alice.testnet', [], salt), /leaks a prover salt/);
   assert.equal(browserDisclosure.assertPublicReportClean(report, 'alice.testnet', TXS.map((t) => t.hash), salt), true);
 });
+
+test('crypto-box parity: browser and Node agree on fingerprints and open each other\'s packages', async () => {
+  const { default: nacl } = await import('tweetnacl');
+  globalThis.nacl = nacl;
+  const nodeBox = await import('../src/crypto-box.js');
+  const browserBox = await import('../public/js/crypto-box.js');
+  const keys = nodeBox.newVerifierKeypair();
+  assert.equal(await browserBox.verifierKeyFingerprint(keys.publicKey), nodeBox.verifierKeyFingerprint(keys.publicKey));
+  assert.deepEqual(browserBox.newVerifierKeypair().publicKey.length, nodeBox.newVerifierKeypair().publicKey.length);
+  const { disclosure } = (() => {
+    const snap = SNAPSHOT;
+    const salt = nodeReport.newProverSalt();
+    const claims = nodeEngine.evaluateClaims(snap, POLICY, NOW_NS).claims;
+    const report = nodeReport.buildReport({
+      proverAddressHash: nodeReport.saltedAddressHash(salt, 'alice.testnet'),
+      claims,
+      policyVersion: POLICY_VERSION,
+      aiSummary: null,
+      evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+      expiresAt: '1825497600000000000',
+    });
+    return { disclosure: nodeDisclosure.buildDisclosurePackage(report, 'alice.testnet', snap, salt) };
+  })();
+  // Node encrypts, browser opens.
+  const nodeEncrypted = nodeBox.encryptDisclosurePackage(disclosure, keys.publicKey, '1825497600000000000');
+  assert.equal(browserBox.isEncryptedDisclosurePackage(nodeEncrypted), true);
+  assert.deepEqual(browserBox.openDisclosurePackage(nodeEncrypted, keys.secretKey, NOW_NS), disclosure);
+  // Browser encrypts, Node opens.
+  const browserEncrypted = await browserBox.encryptDisclosurePackage(disclosure, keys.publicKey, '1825497600000000000');
+  assert.equal(nodeBox.isEncryptedDisclosurePackage(browserEncrypted), true);
+  assert.deepEqual(nodeBox.openDisclosurePackage(browserEncrypted, keys.secretKey, NOW_NS), disclosure);
+  // Both reject an expired package, with the same message.
+  const expired = nodeBox.encryptDisclosurePackage(disclosure, keys.publicKey, '1000000000000000000');
+  assert.throws(() => browserBox.openDisclosurePackage(expired, keys.secretKey, NOW_NS), /expired/);
+  assert.throws(() => nodeBox.openDisclosurePackage(expired, keys.secretKey, NOW_NS), /expired/);
+});

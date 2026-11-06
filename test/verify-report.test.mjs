@@ -778,3 +778,24 @@ test('verify predicate: a scored predicate report verifies with the band only', 
   assert.equal(report.score.value, undefined);
   assert.ok(report.score.components.every((c) => c.points === undefined));
 });
+
+test('parity: page copy of crypto-box opens Node-encrypted packages and rejects expired ones', async () => {
+  const page = loadPageVerify();
+  const { newVerifierKeypair, encryptDisclosurePackage, isEncryptedDisclosurePackage } = await import('../src/crypto-box.js');
+  const keys = newVerifierKeypair();
+  const g = genuine();
+  const encrypted = encryptDisclosurePackage(g.disclosurePackage, keys.publicKey, g.report.expiresAt);
+  assert.equal(isEncryptedDisclosurePackage(encrypted), true);
+  assert.equal(page.isEncryptedDisclosurePackage(encrypted), true);
+  assert.equal(page.isEncryptedDisclosurePackage(g.disclosurePackage), false);
+  // The page opens the Node-encrypted package back to the original.
+  // Compare by canonical JSON, not deepEqual or plain JSON: the page
+  // runs in a VM realm (different prototypes) and the encryption
+  // round-trips through canonicalJson, which sorts keys.
+  const { canonicalJson } = await import('../src/canonical.js');
+  const opened = page.openDisclosurePackage(encrypted, keys.secretKey, NOW_NS);
+  assert.equal(page.canonicalJson(opened), canonicalJson(g.disclosurePackage));
+  // And rejects an expired package, with the same message as Node.
+  const expired = encryptDisclosurePackage(g.disclosurePackage, keys.publicKey, '1000000000000000000');
+  assert.throws(() => page.openDisclosurePackage(expired, keys.secretKey, NOW_NS), /expired/);
+});

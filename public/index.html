@@ -287,6 +287,16 @@
       <button id="downloadReportBtn" type="button" disabled>Download report JSON</button>
       <button id="downloadDisclosureBtn" type="button" disabled>Download disclosure package JSON</button>
     </p>
+    <p class="muted">Verifier-bound disclosure (P4): paste one verifier's encryption public key (Curve25519, base64 — they generate it with the "Generate verifier key" tool on the verify page) and the disclosure package is sealed so only that verifier can open it. The sealed package expires with the report.</p>
+    <p>
+      <label for="verifierKeyInput">Verifier encryption public key (base64)</label>
+      <input id="verifierKeyInput" type="text" autocomplete="off" spellcheck="false" placeholder="Base64 Curve25519 public key">
+    </p>
+    <p>
+      <button id="encryptDisclosureBtn" type="button" disabled>Encrypt disclosure for this verifier</button>
+      <button id="downloadEncryptedBtn" type="button" disabled>Download encrypted disclosure JSON</button>
+    </p>
+    <div id="encryptOut"></div>
   </section>
 
   <section class="card" id="step-5">

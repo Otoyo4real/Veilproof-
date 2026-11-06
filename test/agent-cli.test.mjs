@@ -77,3 +77,31 @@ test('agent CLI: dry run against the demo wallets builds a signature-linked repo
   assert.equal(policy.aggregateBalanceAtLeastYocto, '10000000000000000000000000');
   assert.ok(existsSync(join(out, 'report.json')));
 });
+
+test('agent CLI: --verifier-key writes an encrypted disclosure only the verifier can open', { timeout: 240000 }, async () => {
+  const { newVerifierKeypair, openDisclosurePackage, isEncryptedDisclosurePackage } = await import('../src/crypto-box.js');
+  const keys = newVerifierKeypair();
+  const out = mkdtempSync(join(tmpdir(), 'agent-prove-enc-'));
+  const r = run([
+    '--keys', KEYS,
+    '--policy', POLICY,
+    '--txs', TXS,
+    '--sample-window', '1',
+    '--no-underwrite',
+    '--verifier-key', keys.publicKey,
+    '--out', out,
+  ]);
+  assert.equal(r.status, 0, `CLI failed: ${r.stderr}\n${r.stdout}`);
+  assert.match(r.stdout, /disclosure-encrypted\.json/);
+  const encrypted = JSON.parse(readFileSync(join(out, 'disclosure-encrypted.json'), 'utf8'));
+  const plain = JSON.parse(readFileSync(join(out, 'disclosure.json'), 'utf8'));
+  const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'));
+  assert.equal(isEncryptedDisclosurePackage(encrypted), true);
+  assert.equal(encrypted.expiresAt, report.expiresAt);
+  // Only the verifier's key opens it, back to exactly the plaintext package.
+  const opened = openDisclosurePackage(encrypted, keys.secretKey, String(BigInt(Date.now()) * 1000000n));
+  assert.deepEqual(opened, plain);
+  // A different verifier key cannot open it.
+  const other = newVerifierKeypair();
+  assert.throws(() => openDisclosurePackage(encrypted, other.secretKey, String(BigInt(Date.now()) * 1000000n)), /could not decrypt/);
+});

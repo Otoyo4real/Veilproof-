@@ -32,6 +32,7 @@ import { evaluateClaims } from './js/claims-engine.js';
 import { computeScore } from './js/score.js';
 import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, commitAddress } from './js/report.js';
 import { buildDisclosurePackage, buildMultiDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
+import { encryptDisclosurePackage, verifierKeyFingerprint } from './js/crypto-box.js';
 import { fetchAccountSnapshot, dataHashForSnapshots } from './js/onchain.js';
 import { sha256Hex, randomHex } from './js/crypto.js';
 import { buildLinkMessage, verifyLinkSignature } from './js/nep413.js';
@@ -885,6 +886,10 @@ async function buildReportAndHashes() {
       '<pre>' + esc(JSON.stringify(report, null, 2)) + '</pre>';
     $('downloadReportBtn').disabled = false;
     $('downloadDisclosureBtn').disabled = false;
+    $('encryptDisclosureBtn').disabled = false;
+    $('downloadEncryptedBtn').disabled = true;
+    state.encryptedDisclosurePackage = null;
+    $('encryptOut').innerHTML = '';
     $('publishCost').innerHTML =
       'Publishing attaches <strong>0.01 NEAR</strong> and a 100 TGas gas limit. ' +
       'The contract charges storage at cost (roughly 0.003–0.005 NEAR for a claim record) and refunds the excess deposit; ' +
@@ -894,6 +899,31 @@ async function buildReportAndHashes() {
     saveState();
   } catch (err) {
     out.innerHTML = '<p class="error">Report build failed: ' + esc(err.message) + '</p>';
+  }
+}
+
+// --- Verifier-bound disclosure (P4) ---
+// Seal the disclosure package for ONE verifier: only the holder of
+// that verifier's Curve25519 secret key can open it, and it expires
+// with the report. The sealed package is downloaded, never shown
+// on the page (it is ciphertext).
+async function encryptDisclosureForVerifier() {
+  const out = $('encryptOut');
+  try {
+    if (!state.report || !state.disclosurePackage) throw new Error('Build a report first.');
+    const key = $('verifierKeyInput').value.trim();
+    if (!key) throw new Error('Paste the verifier\'s encryption public key (base64) first.');
+    const encrypted = await encryptDisclosurePackage(state.disclosurePackage, key, state.report.expiresAt);
+    state.encryptedDisclosurePackage = encrypted;
+    const fingerprint = (await verifierKeyFingerprint(key)).slice(0, 16);
+    out.innerHTML =
+      '<p class="ok">Sealed for verifier key ' + esc(fingerprint) + '… — only that verifier can open it.</p>' +
+      '<p>Expires with the report: <span class="mono">' +
+      esc(new Date(Number(BigInt(state.report.expiresAt) / 1000000n)).toISOString()) + '</span></p>';
+    $('downloadEncryptedBtn').disabled = false;
+    saveState();
+  } catch (err) {
+    out.innerHTML = '<p class="err">Could not seal the disclosure package: ' + esc(err.message) + '</p>';
   }
 }
 
@@ -1010,6 +1040,9 @@ function restoreUIFromState() {
       '<pre>' + esc(JSON.stringify(state.report, null, 2)) + '</pre>';
     $('downloadReportBtn').disabled = false;
     $('downloadDisclosureBtn').disabled = false;
+    $('encryptDisclosureBtn').disabled = !state.disclosurePackage;
+    $('downloadEncryptedBtn').disabled = true;
+    state.encryptedDisclosurePackage = null;
     $('publishCost').innerHTML =
       'Publishing attaches <strong>0.01 NEAR</strong> and a 100 TGas gas limit. ' +
       'The contract charges storage at cost and refunds the excess deposit. The wallet shows the exact amounts before you sign.';
@@ -1056,6 +1089,12 @@ window.addEventListener('load', async () => {
   $('downloadDisclosureBtn').addEventListener('click', () => {
     if (state.disclosurePackage) {
       download(`veilproof-disclosure-${state.disclosurePackage.reportId}.json`, state.disclosurePackage);
+    }
+  });
+  $('encryptDisclosureBtn').addEventListener('click', encryptDisclosureForVerifier);
+  $('downloadEncryptedBtn').addEventListener('click', () => {
+    if (state.encryptedDisclosurePackage) {
+      download(`veilproof-disclosure-encrypted-${state.report.reportId}.json`, state.encryptedDisclosurePackage);
     }
   });
   $('publishConfirm').addEventListener('change', () => {
