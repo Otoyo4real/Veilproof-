@@ -43,16 +43,16 @@
         <span class="badge-valid">VALID</span>
         <span class="mock-title">VeilProof report</span>
       </div>
-      <p class="mock-id">Report <span class="mono">7c063555730c20fb</span></p>
+      <p class="mock-id">Report <span class="mono">a41d9faaa0a19148</span></p>
       <table class="mock-claims">
         <tr><td>Aggregate balance at least 10 NEAR</td><td class="mock-pass">Pass · 12.65 NEAR</td></tr>
         <tr><td>Sustained balance at least 10 NEAR</td><td class="mock-pass">Pass · 12.65 NEAR</td></tr>
         <tr><td>Volume at least 1 NEAR</td><td class="mock-pass">Pass · 2.35 NEAR</td></tr>
         <tr><td>Transactions</td><td class="mock-pass">Pass · 5</td></tr>
-        <tr><td>Credit score</td><td class="mock-pass">790 / 1000 · solid</td></tr>
+        <tr><td>Credit score</td><td class="mock-pass">770 / 1000 · solid</td></tr>
       </table>
-      <p class="mock-ai">Underwriting (advisory): <strong>lend_with_limits — suggested limit 4 NEAR</strong> — NEAR AI Cloud, attested</p>
-      <p class="mock-foot">Anchored on NEAR testnet · tx <span class="mono">FD2zjjxc…r1pKR</span></p>
+      <p class="mock-ai">Underwriting (advisory): <strong>lend_with_limits — suggested limit 3 NEAR</strong> — NEAR AI Cloud, attested</p>
+      <p class="mock-foot">Anchored on NEAR testnet · tx <span class="mono">3za51UYQ…UFNoE</span></p>
     </div>
   </div>
 </section>
@@ -111,8 +111,8 @@
     <tr><th>Claim</th><th>What proves it</th></tr>
     <tr><td>The data is genuine</td><td>The verifier re-fetches it from the chain. Onchain data cannot be typed in by the user.</td></tr>
     <tr><td>The balance was held, not flashed</td><td>Sampled balance history at past block heights: the lowest sampled balance over the window, not a snapshot.</td></tr>
-    <tr><td>The wallets are all the prover's</td><td>Each linked wallet proves ownership with a transfer to the primary wallet — only its key holder could have signed it.</td></tr>
-    <tr><td>The credit score is real</td><td>The score is deterministic (score-v1, published rules): the verifier recomputes it from the same snapshots and the same windows. A tampered score fails verification.</td></tr>
+    <tr><td>The wallets are all the prover's</td><td>Each linked wallet proves ownership with a transfer to the primary wallet, or by signing a link message with its key — no transfer, no gas.</td></tr>
+    <tr><td>The credit score is real</td><td>The score is deterministic (score-v2, published rules): the verifier recomputes it from the same snapshots and the same windows. A tampered score fails verification.</td></tr>
     <tr><td>The underwriting opinion is honest</td><td>NEAR AI Cloud TEE attestation, nonce-bound to the request. The verdict is advisory — a thin score can never support a lend, by a deterministic guard.</td></tr>
     <tr><td>The report was not altered</td><td>SHA-256 report hash anchored on NEAR; tampering fails verification.</td></tr>
     <tr><td>The wallet belongs to the prover</td><td>The prover signs a challenge with the wallet key; the publish transaction records the signer as owner.</td></tr>

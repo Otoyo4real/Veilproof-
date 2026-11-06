@@ -79,15 +79,11 @@ staked 0 = **600** — the bottom edge of solid, down 320 points from 920.
 - v2 is calibrated for testnet-scale treasuries, like v1. Mainnet-scale
   recalibration is a later version, not this one.
 
-## Implementation checklist (for the main agent, not done here)
+## Implementation checklist — DONE 2026-11-06
 
-1. `src/score.js`: add `counterparty_diversity`, external-only filtering for
-   activity/volume, new weights; bump `SCORE_VERSION` to `score-v2` only for
-   newly computed scores — keep a v1 code path so old reports verify.
-2. `docs/score-v1.md`: leave untouched as the v1 recipe.
-3. `src/verify-report.js` + browser mirror: recompute the declared version.
-4. `test/score.test.mjs`: v2 demo case (770), wash case (600), v1 still 790.
-5. Re-publish the demo claim under v2 and re-verify live; update the landing
-   copy's score line only after the live check passes.
-6. Update the AI underwriting prompt/guard only if the band edges move — they
-   do not (thin <300, building 300–599, solid 600–799, strong ≥800).
+1. `src/score.js`: counterparty_diversity added, external-only filtering for activity/volume, new weights; `SCORE_VERSION` is `score-v2` for newly computed scores, v1 code path kept so old reports verify. ✅
+2. `docs/score-v1.md`: left untouched as the v1 recipe. ✅
+3. `src/verify-report.js` + browser mirror + verify.html inline: recompute the declared version. ✅
+4. `test/score.test.mjs`: v2 demo case (770), wash case (600), v1 still 790. ✅ (full suite 125/125)
+5. Demo claim re-published under v2 and re-verified live: report `a41d9faaa0a19148`, publish tx `3za51UYQNxrkZQT54ZPyTS8BHwRLKbCMFhZwXHuUFNoE`, score 770 (solid), all 9 checks pass; landing copy updated after the live check passed. ✅
+6. AI underwriting prompt/guard unchanged — band edges did not move (thin <300, building 300–599, solid 600–799, strong ≥800). ✅
