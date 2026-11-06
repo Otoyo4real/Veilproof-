@@ -38,6 +38,41 @@ function sha256Hex(str) {
   return createHash('sha256').update(str, 'utf8').digest('hex');
 }
 
+// P2 unlinkability: a fresh random salt per report, so two reports
+// from the same treasury get different commitments and cannot be
+// matched from public data.
+//
+// - newProverSalt(): 16 random bytes, hex-encoded (32 chars).
+// - saltedAddressHash(salt, address): SHA-256 over the UTF-8 bytes of
+//   (salt hex + address). The salt NEVER appears in the public report
+//   or onchain — it travels only inside the private disclosure package,
+//   so a dictionary attacker cannot precompute the hash without it.
+// - commitAddress(address, salt): salted when a salt is given, plain
+//   sha256(address) when omitted. The plain form is the legacy
+//   commitment of reports published before P2; the verifier still
+//   accepts it (fallback in verify-report.js) so old reports keep
+//   verifying.
+export function newProverSalt() {
+  return randomBytes(16).toString('hex');
+}
+
+const SALT_HEX = /^[0-9a-f]{32}$/;
+
+export function saltedAddressHash(salt, address) {
+  if (typeof salt !== 'string' || !SALT_HEX.test(salt)) {
+    throw new Error('saltedAddressHash: salt must be 32 lowercase hex chars (16 random bytes)');
+  }
+  if (typeof address !== 'string' || address.length === 0) {
+    throw new Error('saltedAddressHash: address must be a non-empty string');
+  }
+  return sha256Hex(salt + address);
+}
+
+export function commitAddress(address, salt) {
+  if (salt === undefined || salt === null) return sha256Hex(address);
+  return saltedAddressHash(salt, address);
+}
+
 function requireHexHash(value, label) {
   if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
     throw new Error(`report: ${label} must be a 64-char lowercase hex SHA-256, got ${JSON.stringify(value)}`);
@@ -108,8 +143,13 @@ export function policyHash(policyVersion, policy) {
 }
 
 // Build the public report.
-// - proverAddressHash: SHA-256 hex of the prover's address. The address
-//   itself must never appear in the report.
+// - proverAddressHash: SHA-256 hex commitment of the prover's address.
+//   Since P2 this is normally the SALTED commitment
+//   (saltedAddressHash(salt, address), salt fresh per report, salt
+//   carried only in the disclosure package) — two reports from the
+//   same treasury then have different commitments and cannot be
+//   matched from public data. The plain sha256(address) form is the
+//   legacy commitment of pre-P2 reports; the verifier still accepts it.
 // - claims: the evaluated claims (from evaluateClaims). Only the ids
 //   listed in disclosedFields are included; the rest are withheld.
 //   disclosedFields omitted means "disclose everything evaluated".
@@ -129,6 +169,13 @@ export function policyHash(policyVersion, policy) {
 //   src/score.js ({ version, value, band, components }). A report
 //   without a score is honest ("not scored"); the verifier recomputes
 //   the score when one is present and fails the report when it differs.
+// - includeExactValues (default false, P3): when false, the public
+//   report carries PREDICATES only — claims keep { id, passed,
+//   threshold } and the score keeps { version, band, components
+//   without points }. The exact values stay in the private disclosure
+//   package (the verifier recomputes them from the snapshots). When
+//   true, the exact values are kept — legacy format only, for tests
+//   and for verifying old reports. Never set it for a new publish.
 export function buildReport({
   proverAddressHash,
   claims,
@@ -139,6 +186,7 @@ export function buildReport({
   disclosedFields,
   linkedProverHashes = [],
   score = null,
+  includeExactValues = false,
 }) {
   requireHexHash(proverAddressHash, 'proverAddressHash');
   if (!Array.isArray(claims)) {
@@ -179,6 +227,31 @@ export function buildReport({
   const disclosedSet = new Set(disclosedIds);
   const disclosedClaims = claims.filter((c) => disclosedSet.has(c.id));
 
+  // P3 predicate disclosure: the public report carries thresholds and
+  // bands only. Exact claim values and the exact score (plus per-
+  // component points) are stripped here, at the one place a public
+  // report is built, so no caller can publish them by accident. The
+  // verifier recomputes the exact values from the disclosure
+  // snapshots and checks them against these predicates.
+  const publicClaims = includeExactValues
+    ? disclosedClaims
+    : disclosedClaims.map((c) => ({ id: c.id, passed: c.passed, threshold: c.threshold }));
+  const publicScore =
+    score === null
+      ? null
+      : includeExactValues
+        ? score
+        : {
+            version: score.version,
+            band: score.band,
+            components: score.components.map((comp) => ({
+              id: comp.id,
+              label: comp.label,
+              max: comp.max,
+              measured: comp.measured,
+            })),
+          };
+
   if (!Array.isArray(linkedProverHashes) || linkedProverHashes.some((h) => !SHA256_HEX.test(h))) {
     throw new Error('buildReport: linkedProverHashes must be an array of 64-char lowercase hex SHA-256 hashes');
   }
@@ -205,12 +278,12 @@ export function buildReport({
     prover: proverAddressHash,
     linkedProvers: [...linkedProverHashes],
     createdAt: new Date().toISOString(),
-    claims: disclosedClaims,
+    claims: publicClaims,
     policyVersion,
     aiSummary,
     evidenceRefs: { attestationRef: evidenceRefs.attestationRef, dataHash: evidenceRefs.dataHash },
     expiresAt,
     disclosed: disclosedClaims.map((c) => c.id),
-    score,
+    score: publicScore,
   };
 }

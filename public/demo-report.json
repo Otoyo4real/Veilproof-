@@ -1,63 +1,54 @@
 {
-  "reportId": "a41d9faaa0a19148",
-  "prover": "f951fcc0b515ddbee32eb992a50cbc3e9a2c08747996c5098b363990d8c6620e",
+  "reportId": "b05bf4684960ee83",
+  "prover": "73d5697ff4baa7c7b277de5a147e9b5b258e2706ffe63df259922bffda249c77",
   "linkedProvers": [
-    "be743e7bfb5ae52e1f032effa1bab6bdaa80d251fd27bb2abce3222faaa42ecc"
+    "22c043fd2b3dc41604bc6a51e31512a7e6501ebd63dee8ee181673d0ef86f66a"
   ],
-  "createdAt": "2026-11-06T15:17:51.902Z",
+  "createdAt": "2026-11-06T17:23:21.715Z",
   "claims": [
     {
       "id": "balance_at_least",
       "passed": true,
-      "value": "11148300331437780800000000",
       "threshold": "5000000000000000000000000"
     },
     {
       "id": "tx_count_in_window",
       "passed": true,
-      "value": 5,
       "threshold": 30
     },
     {
       "id": "volume_in_window",
       "passed": true,
-      "value": "2350000000000000000000000",
       "threshold": 30
     },
     {
       "id": "no_failed_txs_in_window",
       "passed": true,
-      "value": 0,
       "threshold": 30
     },
     {
       "id": "aggregate_balance_at_least",
       "passed": true,
-      "value": "12648255694925280800000000",
       "threshold": "10000000000000000000000000"
     },
     {
       "id": "aggregate_tx_count_in_window",
       "passed": true,
-      "value": 5,
       "threshold": 30
     },
     {
       "id": "aggregate_volume_in_window",
       "passed": true,
-      "value": "2350000000000000000000000",
       "threshold": 30
     },
     {
       "id": "sustained_balance_at_least",
       "passed": true,
-      "value": "12648255694925280800000000",
       "threshold": "10000000000000000000000000"
     },
     {
       "id": "time_weighted_balance_at_least",
       "passed": true,
-      "value": "12648255694925280800000000",
       "threshold": "10000000000000000000000000"
     }
   ],
@@ -67,28 +58,28 @@
     "model": "z-ai/glm-5.3-flash",
     "role": "underwriting",
     "verdict": "lend_with_limits",
-    "suggestedLimitNear": 3,
+    "suggestedLimitNear": 5,
     "confidence": "medium",
     "points": [
-      "Score 770 (solid band) with all nine claims passed and no failures.",
-      "Sustained and time-weighted balance components are fully measured and maxed, so the ~12.65 NEAR balance was held across samples rather than flash-deposited.",
-      "Activity is thin: only 5 successful transactions in 30 days scored 70/150, so the history is short and bursty risk cannot be ruled out.",
-      "Counterparty diversity is weak at 30/100, indicating very few distinct outside counterparties.",
-      "Clean execution record with zero failed transactions (100/100) and modest observed volume of ~2.35 NEAR.",
-      "No staked balance (0/50), a minor weakness showing no long-term commitment signal.",
-      "Suggested limit of 3 NEAR is a cautious fraction of the ~12.65 NEAR lowest sampled balance and comfortably above nothing invented."
+      "Score 770 (solid) with all nine claims passing and zero failed transactions.",
+      "Sustained, aggregate, and time-weighted balances all equal ~12.65 NEAR, indicating the balance was held steadily rather than flashed.",
+      "Activity is thin: only 5 successful transactions in 30 days scored 70/150.",
+      "Counterparty diversity is weak at 30/100, suggesting few distinct counterparties.",
+      "No staked balance (0/50), leaving that component unearned.",
+      "Balance components are maxed but the profile leans on holdings over demonstrated activity, so a capped limit is prudent.",
+      "Suggested limit of 5 NEAR is well under the ~12.65 NEAR sustained balance actually held."
     ],
     "attestation": {
       "verifiable": true,
       "nonceMatched": true,
-      "ref": "21fbb13df4bc0cd94fe009e5f99f5baaf793c4ead36447e032ac70bb19eeda53"
+      "ref": "e4f53f09546798a20d2c562b136f1ffdb08b0745d6c19e1330566cd7865df949"
     }
   },
   "evidenceRefs": {
-    "attestationRef": "21fbb13df4bc0cd94fe009e5f99f5baaf793c4ead36447e032ac70bb19eeda53",
-    "dataHash": "473fe602583df7a9c291ec1f1f72cff10767e28d7136a6fbe5b28de00ea8663b"
+    "attestationRef": "e4f53f09546798a20d2c562b136f1ffdb08b0745d6c19e1330566cd7865df949",
+    "dataHash": "b428cc36b9e004b702e78e58b02262388f609df3c46eecb8936014a6ba7bf8c8"
   },
-  "expiresAt": "1796570271000000000",
+  "expiresAt": "1796577801000000000",
   "disclosed": [
     "balance_at_least",
     "tx_count_in_window",
@@ -102,55 +93,47 @@
   ],
   "score": {
     "version": "score-v2",
-    "value": 770,
     "band": "solid",
     "components": [
       {
         "id": "sustained_balance",
         "label": "Lowest sampled balance held",
-        "points": 350,
         "max": 350,
         "measured": true
       },
       {
         "id": "time_weighted_balance",
         "label": "Average sampled balance",
-        "points": 150,
         "max": 150,
         "measured": true
       },
       {
         "id": "activity",
         "label": "Successful transactions and week spread",
-        "points": 70,
         "max": 150,
         "measured": true
       },
       {
         "id": "counterparty_diversity",
         "label": "Distinct outside counterparties",
-        "points": 30,
         "max": 100,
         "measured": true
       },
       {
         "id": "volume",
         "label": "Volume in window",
-        "points": 70,
         "max": 100,
         "measured": true
       },
       {
         "id": "no_failed",
         "label": "No failed transactions in window",
-        "points": 100,
         "max": 100,
         "measured": true
       },
       {
         "id": "staked",
         "label": "Staked balance held",
-        "points": 0,
         "max": 50,
         "measured": true
       }

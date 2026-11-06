@@ -298,6 +298,76 @@ test('report + disclosure parity with score and linked wallets', async () => {
   nodeBuilt.createdAt = '2026-11-06T00:00:00.000Z';
   browserBuilt.createdAt = '2026-11-06T00:00:00.000Z';
   assert.deepEqual(browserBuilt, nodeBuilt);
-  assert.equal(browserBuilt.score.value, score.value);
+  // P3: the public report carries the band, not the exact value or
+  // per-component points — on both paths.
+  assert.equal(browserBuilt.score.band, score.band);
+  assert.equal(browserBuilt.score.value, undefined);
+  assert.ok(browserBuilt.score.components.every((c) => c.points === undefined));
   assert.deepEqual(browserBuilt.linkedProvers, [linked]);
+});
+
+test('salt parity: browser and Node salted commitments agree', async () => {
+  const salt = nodeReport.newProverSalt();
+  assert.match(salt, /^[0-9a-f]{32}$/);
+  assert.match(browserReport.newProverSalt(), /^[0-9a-f]{32}$/);
+  const nodeHash = nodeReport.saltedAddressHash(salt, 'alice.testnet');
+  const browserHash = await browserReport.saltedAddressHash(salt, 'alice.testnet');
+  assert.equal(browserHash, nodeHash);
+  assert.equal(await browserReport.commitAddress('alice.testnet', salt), nodeReport.commitAddress('alice.testnet', salt));
+  assert.equal(await browserReport.commitAddress('alice.testnet'), nodeReport.commitAddress('alice.testnet'));
+  // Salted disclosure packages agree across paths, including the salt.
+  const claims = nodeEngine.evaluateClaims(SNAPSHOT, POLICY, NOW_NS).claims;
+  const report = nodeReport.buildReport({
+    proverAddressHash: nodeHash,
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: SNAPSHOT.dataHash, attestationRef: null },
+    expiresAt: '1825497600000000000',
+  });
+  const nodePkg = nodeDisclosure.buildDisclosurePackage(report, 'alice.testnet', SNAPSHOT, salt);
+  const browserPkg = await browserDisclosure.buildDisclosurePackage(report, 'alice.testnet', SNAPSHOT, salt);
+  assert.deepEqual(browserPkg, nodePkg);
+  assert.equal(browserPkg.salt, salt);
+  // The tripwire refuses a report carrying the salt, on both paths.
+  const leaked = { ...report, note: salt };
+  assert.throws(() => browserDisclosure.assertPublicReportClean(leaked, 'alice.testnet', [], salt), /leaks a prover salt/);
+  assert.throws(() => nodeDisclosure.assertPublicReportClean(leaked, 'alice.testnet', [], salt), /leaks a prover salt/);
+  assert.equal(browserDisclosure.assertPublicReportClean(report, 'alice.testnet', TXS.map((t) => t.hash), salt), true);
+});
+
+test('crypto-box parity: browser and Node agree on fingerprints and open each other\'s packages', async () => {
+  const { default: nacl } = await import('tweetnacl');
+  globalThis.nacl = nacl;
+  const nodeBox = await import('../src/crypto-box.js');
+  const browserBox = await import('../public/js/crypto-box.js');
+  const keys = nodeBox.newVerifierKeypair();
+  assert.equal(await browserBox.verifierKeyFingerprint(keys.publicKey), nodeBox.verifierKeyFingerprint(keys.publicKey));
+  assert.deepEqual(browserBox.newVerifierKeypair().publicKey.length, nodeBox.newVerifierKeypair().publicKey.length);
+  const { disclosure } = (() => {
+    const snap = SNAPSHOT;
+    const salt = nodeReport.newProverSalt();
+    const claims = nodeEngine.evaluateClaims(snap, POLICY, NOW_NS).claims;
+    const report = nodeReport.buildReport({
+      proverAddressHash: nodeReport.saltedAddressHash(salt, 'alice.testnet'),
+      claims,
+      policyVersion: POLICY_VERSION,
+      aiSummary: null,
+      evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+      expiresAt: '1825497600000000000',
+    });
+    return { disclosure: nodeDisclosure.buildDisclosurePackage(report, 'alice.testnet', snap, salt) };
+  })();
+  // Node encrypts, browser opens.
+  const nodeEncrypted = nodeBox.encryptDisclosurePackage(disclosure, keys.publicKey, '1825497600000000000');
+  assert.equal(browserBox.isEncryptedDisclosurePackage(nodeEncrypted), true);
+  assert.deepEqual(browserBox.openDisclosurePackage(nodeEncrypted, keys.secretKey, NOW_NS), disclosure);
+  // Browser encrypts, Node opens.
+  const browserEncrypted = await browserBox.encryptDisclosurePackage(disclosure, keys.publicKey, '1825497600000000000');
+  assert.equal(nodeBox.isEncryptedDisclosurePackage(browserEncrypted), true);
+  assert.deepEqual(nodeBox.openDisclosurePackage(browserEncrypted, keys.secretKey, NOW_NS), disclosure);
+  // Both reject an expired package, with the same message.
+  const expired = nodeBox.encryptDisclosurePackage(disclosure, keys.publicKey, '1000000000000000000');
+  assert.throws(() => browserBox.openDisclosurePackage(expired, keys.secretKey, NOW_NS), /expired/);
+  assert.throws(() => nodeBox.openDisclosurePackage(expired, keys.secretKey, NOW_NS), /expired/);
 });

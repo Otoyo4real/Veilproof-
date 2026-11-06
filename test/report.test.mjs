@@ -262,3 +262,117 @@ test('null AI summary is allowed and never auto-filled', () => {
   // The report carries no analysis text anywhere.
   assert.equal(JSON.stringify(omitted).includes('analys'), false);
 });
+
+// P2 unlinkability: salted commitments.
+test('salt helpers: newProverSalt is 32 hex chars, salted hash is deterministic and differs per salt', async () => {
+  const { newProverSalt, saltedAddressHash, commitAddress } = await import('../src/report.js');
+  const salt = newProverSalt();
+  assert.match(salt, /^[0-9a-f]{32}$/);
+  assert.notEqual(newProverSalt(), salt);
+  const h1 = saltedAddressHash(salt, ADDRESS);
+  assert.equal(h1, saltedAddressHash(salt, ADDRESS));
+  assert.match(h1, /^[0-9a-f]{64}$/);
+  // A different salt gives a different commitment for the same address.
+  assert.notEqual(saltedAddressHash(newProverSalt(), ADDRESS), h1);
+  // Salted differs from the legacy plain hash.
+  assert.notEqual(h1, sha256Hex(ADDRESS));
+  // commitAddress without a salt is the legacy plain hash.
+  assert.equal(commitAddress(ADDRESS), sha256Hex(ADDRESS));
+  assert.equal(commitAddress(ADDRESS, salt), h1);
+  // Bad salts and addresses are rejected.
+  assert.throws(() => saltedAddressHash('xyz', ADDRESS), /salt must be 32/);
+  assert.throws(() => saltedAddressHash('0'.repeat(31), ADDRESS), /salt must be 32/);
+  assert.throws(() => saltedAddressHash(salt, ''), /address must be a non-empty string/);
+});
+
+test('disclosure with salt: package carries the salt, wrong salt refuses, tripwire catches a leaked salt', async () => {
+  const { newProverSalt, saltedAddressHash } = await import('../src/report.js');
+  const { buildDisclosurePackage, assertPublicReportClean } = await import('../src/disclosure.js');
+  const salt = newProverSalt();
+  const snap = snapshot();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: saltedAddressHash(salt, ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+  });
+  const pkg = buildDisclosurePackage(report, ADDRESS, snap, salt);
+  assert.equal(pkg.salt, salt);
+  assert.equal(pkg.address, ADDRESS);
+  // A wrong salt does not bind to this report.
+  assert.throws(() => buildDisclosurePackage(report, ADDRESS, snap, newProverSalt()), /does not hash to report.prover/);
+  // The legacy (unsalted) package does not bind to a salted report.
+  assert.throws(() => buildDisclosurePackage(report, ADDRESS, snap), /does not hash to report.prover/);
+  // The tripwire refuses a report that contains a salt.
+  const leaked = { ...report, note: salt };
+  assert.throws(() => assertPublicReportClean(leaked, ADDRESS, [], salt), /leaks a prover salt/);
+  assert.equal(assertPublicReportClean(report, ADDRESS, snap.txs.map((t) => t.hash), salt), true);
+});
+
+// P3 predicate disclosure: the public report carries thresholds and
+// bands only; exact values stay in the disclosure package.
+test('buildReport strips exact values by default; includeExactValues keeps them', async () => {
+  const { newProverSalt, saltedAddressHash } = await import('../src/report.js');
+  const { computeScore } = await import('../src/score.js');
+  const salt = newProverSalt();
+  const snap = snapshot();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const score = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, NOW_NS);
+  const base = {
+    proverAddressHash: saltedAddressHash(salt, ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    score,
+  };
+  const predicate = buildReport(base);
+  assert.ok(predicate.claims.every((c) => c.value === undefined));
+  assert.ok(predicate.claims.every((c) => typeof c.threshold === 'string' || typeof c.threshold === 'number'));
+  assert.equal(predicate.score.value, undefined);
+  assert.equal(predicate.score.band, score.band);
+  assert.ok(predicate.score.components.every((c) => c.points === undefined));
+  assert.ok(predicate.score.components.every((c) => typeof c.max === 'number'));
+  // The exact values are still in the input — buildReport stripped
+  // them, it did not lose them.
+  assert.equal(score.value, 310);
+  const legacy = buildReport({ ...base, includeExactValues: true });
+  assert.equal(legacy.claims[0].value, claims[0].value);
+  assert.equal(legacy.score.value, score.value);
+  assert.equal(legacy.score.components[0].points, score.components[0].points);
+});
+
+test('tripwire rejects a public report that carries exact values', async () => {
+  const { buildDisclosurePackage, assertPublicReportClean } = await import('../src/disclosure.js');
+  const snap = snapshot();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const { computeScore } = await import('../src/score.js');
+  const score = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, NOW_NS);
+  const legacy = buildReport({
+    proverAddressHash: sha256Hex(ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    score,
+    includeExactValues: true,
+  });
+  // A legacy report (exact values) trips the wire: it must never be
+  // published as a new report.
+  assert.throws(() => assertPublicReportClean(legacy, ADDRESS, []), /leaks the exact value/);
+  const predicate = buildReport({
+    proverAddressHash: sha256Hex(ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    score,
+  });
+  assert.equal(assertPublicReportClean(predicate, ADDRESS, snap.txs.map((t) => t.hash)), true);
+});

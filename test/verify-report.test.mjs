@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import { computeDataHash, dataHashForSnapshots } from '../src/onchain.js';
-import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
+import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, saltedAddressHash } from '../src/report.js';
 import { buildDisclosurePackage, buildMultiDisclosurePackage } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
 import { signLinkMessage, buildLinkMessage, base58Encode } from '../src/nep413.js';
@@ -327,6 +327,20 @@ test('parity: page copy agrees with the Node module', async () => {
   expired.expiresAt = (NOW_NS - 1n * DAY_NS).toString();
   cases.expired = { ...base, report: expired, onchainRecord: onchainRecordFor(expired, { valid: true }) };
   cases.timeShift = { ...base, nowNs: NOW_NS + 60n * DAY_NS };
+  // P2: a salted report and a wrong-salt report must agree too.
+  const salted = saltedGenuine();
+  const saltedBase = {
+    report: salted.report,
+    onchainRecord: salted.onchainRecord,
+    disclosurePackage: salted.disclosurePackage,
+    policy: salted.policy,
+    nowNs: salted.nowNs,
+  };
+  cases.salted = saltedBase;
+  cases.saltedWrongSalt = {
+    ...saltedBase,
+    disclosurePackage: { ...saltedBase.disclosurePackage, salt: newProverSalt() },
+  };
   // Malformed snapshot: the claims re-run throws, and the detail must
   // carry the engine's exact message in both implementations.
   const badSnap = JSON.parse(JSON.stringify(g.snapshot));
@@ -407,9 +421,13 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const { report, onchainRecord, disclosurePackage, policy, nowNs } = genuine();
   const snap = disclosurePackage.snapshot;
   const score = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, nowNs);
+  // Build the scored report from the EVALUATED claims (which carry
+  // exact values) — the built report's claims are predicates only
+  // since P3 and cannot be fed back into buildReport.
+  const evaluated = evaluateClaims(snap, POLICY, nowNs).claims;
   const scored = buildReport({
     proverAddressHash: report.prover,
-    claims: report.claims,
+    claims: evaluated,
     policyVersion: POLICY_VERSION,
     aiSummary: null,
     evidenceRefs: report.evidenceRefs,
@@ -420,8 +438,33 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const ok = verifyReport({ report: scored, onchainRecord: record, disclosurePackage, policy, nowNs });
   assert.equal(ok.valid, true);
   assert.equal(checkByName(ok, 'score').passed, true);
-  // Tamper with the reported score value (and re-sign the report hash so only the score check can fail).
-  const tampered = { ...scored, score: { ...score, value: score.value + 1 } };
+  // The public score is a predicate: band only, no exact value.
+  assert.equal(scored.score.value, undefined);
+  assert.equal(scored.score.band, score.band);
+  // Tamper with the reported score band (and re-sign the report hash so only the score check can fail).
+  const tamperedBand = { ...scored, score: { ...scored.score, band: scored.score.band === 'solid' ? 'strong' : 'solid' } };
+  const tamperedBandRecord = onchainRecordFor(tamperedBand);
+  const badBand = verifyReport({ report: tamperedBand, onchainRecord: tamperedBandRecord, disclosurePackage, policy, nowNs });
+  assert.equal(badBand.valid, false);
+  assert.equal(checkByName(badBand, 'score').passed, false);
+  assert.equal(checkByName(badBand, 'report_hash').passed, true);
+  // A legacy (pre-P3) report with an exact value still verifies, and
+  // tampering with that value still fails.
+  const legacyScored = buildReport({
+    proverAddressHash: report.prover,
+    claims: evaluated,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: report.evidenceRefs,
+    expiresAt: EXPIRES_AT,
+    score,
+    includeExactValues: true,
+  });
+  const legacyRecord = onchainRecordFor(legacyScored);
+  const legacyOk = verifyReport({ report: legacyScored, onchainRecord: legacyRecord, disclosurePackage, policy, nowNs });
+  assert.equal(legacyOk.valid, true);
+  assert.equal(checkByName(legacyOk, 'score').passed, true);
+  const tampered = { ...legacyScored, score: { ...score, value: score.value + 1 } };
   const tamperedRecord = onchainRecordFor(tampered);
   const bad = verifyReport({ report: tampered, onchainRecord: tamperedRecord, disclosurePackage, policy, nowNs });
   assert.equal(bad.valid, false);
@@ -432,7 +475,7 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const scoreV1 = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, nowNs, 'score-v1');
   const scoredV1 = buildReport({
     proverAddressHash: report.prover,
-    claims: report.claims,
+    claims: evaluated,
     policyVersion: POLICY_VERSION,
     aiSummary: null,
     evidenceRefs: report.evidenceRefs,
@@ -443,7 +486,8 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const okV1 = verifyReport({ report: scoredV1, onchainRecord: recordV1, disclosurePackage, policy, nowNs });
   assert.equal(okV1.valid, true);
   assert.equal(checkByName(okV1, 'score').passed, true);
-  assert.equal(checkByName(okV1, 'score').detail, `Score recomputed exactly: ${scoreV1.value} (${scoreV1.band}).`);
+  // P3: the predicate detail carries the band, not the exact value.
+  assert.equal(checkByName(okV1, 'score').detail, `Score recomputed from the disclosure snapshot: band ${scoreV1.band} (matches the public band).`);
 });
 
 test('verify multi-wallet: aggregate claims + link proofs verify; a fake link fails', () => {
@@ -574,4 +618,184 @@ test('verify old reports: no score and no linked wallets still verify', () => {
   assert.equal(result.valid, true);
   assert.equal(checkByName(result, 'score').passed, true);
   assert.equal(checkByName(result, 'link_proofs').passed, true);
+});
+
+// P2 unlinkability: salted commitments verify, legacy ones still verify,
+// and a wrong salt fails the binding.
+function saltedGenuine() {
+  const salt = newProverSalt();
+  const snap = snapshot();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: saltedAddressHash(salt, ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+  });
+  return {
+    salt,
+    address: ADDRESS,
+    snapshot: snap,
+    report,
+    onchainRecord: onchainRecordFor(report),
+    disclosurePackage: buildDisclosurePackage(report, ADDRESS, snap, salt),
+    policy: POLICY,
+    nowNs: NOW_NS,
+  };
+}
+
+test('verify salted: a fresh-salt report verifies valid, all 9 checks pass', () => {
+  const g = saltedGenuine();
+  const result = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(result.valid, true);
+  assert.ok(result.checks.every((c) => c.passed));
+  assert.equal(checkByName(result, 'prover_binding').passed, true);
+});
+
+test('verify salted: two reports from the same address have different commitments', () => {
+  const a = saltedGenuine();
+  const b = saltedGenuine();
+  assert.notEqual(a.report.prover, b.report.prover);
+  assert.notEqual(a.salt, b.salt);
+  // Both still verify against their own disclosure packages.
+  for (const g of [a, b]) {
+    const result = verifyReport({
+      report: g.report,
+      onchainRecord: g.onchainRecord,
+      disclosurePackage: g.disclosurePackage,
+      policy: g.policy,
+      nowNs: g.nowNs,
+    });
+    assert.equal(result.valid, true);
+  }
+});
+
+test('verify salted: a wrong salt fails prover_binding, a missing salt fails a salted report', () => {
+  const g = saltedGenuine();
+  const wrongSalt = newProverSalt();
+  const wrongPkg = { ...g.disclosurePackage, salt: wrongSalt };
+  const wrongResult = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: wrongPkg,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(wrongResult.valid, false);
+  assert.equal(checkByName(wrongResult, 'prover_binding').passed, false);
+  // No salt at all: the verifier falls back to the legacy plain hash,
+  // which does not match a salted commitment.
+  const { salt: _dropped, ...noSaltPkg } = g.disclosurePackage;
+  const noSaltResult = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: noSaltPkg,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(noSaltResult.valid, false);
+  assert.equal(checkByName(noSaltResult, 'prover_binding').passed, false);
+});
+
+test('verify legacy: an unsalted (pre-P2) report still verifies valid', () => {
+  const g = genuine();
+  const result = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(result.valid, true);
+  assert.equal(checkByName(result, 'prover_binding').passed, true);
+});
+
+test('verify predicate: a tampered threshold fails the claims check', () => {
+  const g = saltedGenuine();
+  // The saltedGenuine report is a predicate report (no claim values).
+  const tampered = JSON.parse(JSON.stringify(g.report));
+  tampered.claims[0].threshold = '999999999999999999999999999';
+  const record = onchainRecordFor(tampered);
+  const result = verifyReport({
+    report: tampered,
+    onchainRecord: record,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(result.valid, false);
+  assert.equal(checkByName(result, 'claims').passed, false);
+  assert.match(checkByName(result, 'claims').detail, /threshold differs/);
+  // And the untampered predicate report verifies with the predicate
+  // detail (no exact values in the message).
+  const ok = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(ok.valid, true);
+  assert.match(checkByName(ok, 'claims').detail, /reproduced as predicates/);
+});
+
+test('verify predicate: a scored predicate report verifies with the band only', () => {
+  const snap = snapshot();
+  const salt = newProverSalt();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const score = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: saltedAddressHash(salt, ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    score,
+  });
+  const disclosurePackage = buildDisclosurePackage(report, ADDRESS, snap, salt);
+  const result = verifyReport({
+    report,
+    onchainRecord: onchainRecordFor(report),
+    disclosurePackage,
+    policy: POLICY,
+    nowNs: NOW_NS,
+  });
+  assert.equal(result.valid, true);
+  assert.equal(checkByName(result, 'score').detail, `Score recomputed from the disclosure snapshot: band ${score.band} (matches the public band).`);
+  // The exact score never appears in the score check detail (the
+  // detail that used to print it), and the public report carries no
+  // exact value or points.
+  assert.equal(checkByName(result, 'score').detail.includes(String(score.value)), false);
+  assert.equal(report.score.value, undefined);
+  assert.ok(report.score.components.every((c) => c.points === undefined));
+});
+
+test('parity: page copy of crypto-box opens Node-encrypted packages and rejects expired ones', async () => {
+  const page = loadPageVerify();
+  const { newVerifierKeypair, encryptDisclosurePackage, isEncryptedDisclosurePackage } = await import('../src/crypto-box.js');
+  const keys = newVerifierKeypair();
+  const g = genuine();
+  const encrypted = encryptDisclosurePackage(g.disclosurePackage, keys.publicKey, g.report.expiresAt);
+  assert.equal(isEncryptedDisclosurePackage(encrypted), true);
+  assert.equal(page.isEncryptedDisclosurePackage(encrypted), true);
+  assert.equal(page.isEncryptedDisclosurePackage(g.disclosurePackage), false);
+  // The page opens the Node-encrypted package back to the original.
+  // Compare by canonical JSON, not deepEqual or plain JSON: the page
+  // runs in a VM realm (different prototypes) and the encryption
+  // round-trips through canonicalJson, which sorts keys.
+  const { canonicalJson } = await import('../src/canonical.js');
+  const opened = page.openDisclosurePackage(encrypted, keys.secretKey, NOW_NS);
+  assert.equal(page.canonicalJson(opened), canonicalJson(g.disclosurePackage));
+  // And rejects an expired package, with the same message as Node.
+  const expired = encryptDisclosurePackage(g.disclosurePackage, keys.publicKey, '1000000000000000000');
+  assert.throws(() => page.openDisclosurePackage(expired, keys.secretKey, NOW_NS), /expired/);
 });

@@ -67,8 +67,9 @@ import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import { sanitiseClaims, sanitiseMetrics } from '../src/ai-analysis.js';
 import { canonicalJson } from '../src/canonical.js';
-import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
+import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, commitAddress } from '../src/report.js';
 import { buildMultiDisclosurePackage, assertPublicReportClean } from '../src/disclosure.js';
+import { encryptDisclosurePackage, verifierKeyFingerprint } from '../src/crypto-box.js';
 import { verifyReport } from '../src/verify-report.js';
 import { base58Decode, base58Encode, signLinkMessage } from '../src/nep413.js';
 
@@ -145,6 +146,7 @@ function parseArgs(argv) {
     else if (a === '--out') args.out = take('out');
     else if (a === '--site') args.site = take('site');
     else if (a === '--expiry-days') args.expiryDays = Number(take('expiry-days'));
+    else if (a === '--verifier-key') args.verifierKey = take('verifier-key');
     else if (a === '--underwrite') args.underwrite = true;
     else if (a === '--no-underwrite') args.underwrite = false;
     else if (a === '--publish') args.publish = true;
@@ -165,6 +167,7 @@ function usage() {
   --no-underwrite      Skip the underwriting call
   --publish            Publish the hashes onchain (0.01 NEAR deposit); default is a dry run
   --out <dir>          Output directory for report.json, disclosure.json, policy.json (default ./veilproof-out)
+  --verifier-key <b64> Encrypt the disclosure package for one verifier (Curve25519 public key, base64 — see docs/verifier-bound-disclosure.md); writes disclosure-encrypted.json, expiring with the report
   --site <url>         Live site for underwriting (default ${DEFAULT_SITE})
   --expiry-days <n>    Report expiry in days (default 30)
   --help               Show this help`;
@@ -381,8 +384,12 @@ async function main() {
   }
 
   console.log('[5/6] Build report + disclosure package');
-  const proverAddressHash = createHash('sha256').update(primaryAccountId, 'utf8').digest('hex');
-  const linkedProverHashes = linkedKeys.map((lk) => createHash('sha256').update(lk.accountId, 'utf8').digest('hex'));
+  // P2 unlinkability: a fresh random salt per report (and per linked
+  // wallet). The salts travel only inside the disclosure package.
+  const proverSalt = newProverSalt();
+  const linkedSalts = linkedKeys.map(() => newProverSalt());
+  const proverAddressHash = commitAddress(primaryAccountId, proverSalt);
+  const linkedProverHashes = linkedKeys.map((lk, i) => commitAddress(lk.accountId, linkedSalts[i]));
   const expiresAt = computeExpiresAt(args.expiryDays);
   const multiDataHash = await dataHashForSnapshots(snapshots);
   const report = buildReport({
@@ -395,15 +402,16 @@ async function main() {
     linkedProverHashes,
     score,
   });
-  assertPublicReportClean(report, primaryAccountId, primary.txs.map((t) => t.hash));
+  assertPublicReportClean(report, primaryAccountId, primary.txs.map((t) => t.hash), [proverSalt, ...linkedSalts]);
   for (let i = 0; i < linkedSnapshots.length; i += 1) {
-    assertPublicReportClean(report, linkedKeys[i].accountId, linkedSnapshots[i].txs.map((t) => t.hash));
+    assertPublicReportClean(report, linkedKeys[i].accountId, linkedSnapshots[i].txs.map((t) => t.hash), [proverSalt, ...linkedSalts]);
   }
   const disclosurePackage = buildMultiDisclosurePackage(
     report,
     primaryAccountId,
     primary,
-    linkedKeys.map((lk, i) => ({ address: lk.accountId, snapshot: linkedSnapshots[i], linkSignature: linkSignatures[lk.accountId] })),
+    linkedKeys.map((lk, i) => ({ address: lk.accountId, snapshot: linkedSnapshots[i], linkSignature: linkSignatures[lk.accountId], salt: linkedSalts[i] })),
+    proverSalt,
   );
   const hashes = {
     report_hash: reportHash(report),
@@ -488,6 +496,16 @@ async function main() {
   fs.writeFileSync(path.join(args.out, 'disclosure.json'), JSON.stringify(disclosurePackage, null, 2) + '\n');
   fs.writeFileSync(path.join(args.out, 'policy.json'), JSON.stringify(policy, null, 2) + '\n');
   console.log(`\nWrote ${path.join(args.out, 'report.json')}, disclosure.json, policy.json`);
+  // P4 verifier-bound disclosure: encrypt the package for one verifier
+  // (their Curve25519 public key, base64). The encrypted package
+  // expires with the report; only that verifier can open it.
+  if (args.verifierKey) {
+    const encrypted = encryptDisclosurePackage(disclosurePackage, args.verifierKey, report.expiresAt);
+    const encryptedPath = path.join(args.out, 'disclosure-encrypted.json');
+    fs.writeFileSync(encryptedPath, JSON.stringify(encrypted, null, 2) + '\n');
+    console.log(`Wrote ${encryptedPath} (verifier key fingerprint ${verifierKeyFingerprint(args.verifierKey).slice(0, 16)}…)`);
+    console.log('  Only the holder of that verifier key can open it; it expires with the report.');
+  }
   console.log(JSON.stringify({
     reportId: report.reportId,
     published: args.publish,

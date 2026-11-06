@@ -126,23 +126,15 @@ adapter design (sampling by block height, EIP-191 link proof) is specified in
 this file, and the NEAR implementation is the proof it works. Do not claim
 multi-chain support exists until an adapter passes a live end-to-end test.
 
-## Track reframe — a decision for Isaiah, not a done change
+## Track reframe — REJECTED by Isaiah 2026-11-06
 
-`submission-prep.md` currently lists Privacy & Private AI as primary and
-Agent Economy as secondary. Given his doubt that the privacy use case alone
-wins, the stronger framing is the reverse:
+`submission-prep.md` lists Privacy & Private AI as primary and Agent
+Economy as secondary, and that stays. Isaiah was asked whether to flip
+the order and said he needs it to be privacy — so the flip below is
+rejected, do not re-suggest it. Privacy is the track; agent commerce is
+the use case inside it, not a replacement for it.
 
-- **Primary: Agent Economy.** The use case is agents proving they can pay
-  each other before a deal — proof-of-funds for agent commerce. That is what
-  the sharpened claims, the portable score and the underwriter actually do.
-- **Secondary: Privacy & Private AI.** Privacy is the mechanism (hashes on
-  the public record, address only to the chosen verifier, TEE attestation),
-  not the whole pitch.
-
-The build log on nearhackathon.com (checked 2026-11-06) shows the Agent
-Economy field is crowded with spending guards, which is good news, not bad:
-guards need counterparties they can trust, and VeilProof is the counterparty
-side of their story. The form allows selecting every track the project fits,
-and it is still one submission per project — switching the primary track
-costs nothing but the wording. This needs his yes before submission-prep.md
-is edited.
+(Original suggestion, kept for the record: given his doubt that the
+privacy use case alone wins, the stronger framing was thought to be
+Agent Economy primary — proof-of-funds for agent commerce — with
+Privacy secondary as the mechanism. He said no.)

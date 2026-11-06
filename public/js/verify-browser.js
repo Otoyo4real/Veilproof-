@@ -20,7 +20,7 @@ import { sha256Hex } from './crypto.js';
 import { evaluateClaims } from './claims-engine.js';
 import { dataHashForSnapshots } from './onchain.js';
 import { computeScore } from './score.js';
-import { reportHash, evidenceHash, policyHash } from './report.js';
+import { reportHash, evidenceHash, policyHash, saltedAddressHash } from './report.js';
 import { buildLinkMessage, verifyLinkSignature } from './nep413.js';
 
 function isObject(value) {
@@ -57,20 +57,32 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
   }
   const bundle = { wallets: snapshots };
 
-  // 0. The disclosure package belongs to this report.
+  // 0. The disclosure package belongs to this report. With a salt
+  // (P2) the binding is the salted commitment; without one it is the
+  // legacy plain sha256(address) of pre-P2 reports.
+  const addressMatchesCommitment = async (address, salt, commitment) => {
+    if (salt === undefined || salt === null) return (await sha256Hex(address)) === commitment;
+    if (typeof salt !== 'string' || !/^[0-9a-f]{32}$/.test(salt)) return false;
+    return (await saltedAddressHash(salt, address)) === commitment;
+  };
   if (typeof disclosurePackage.address !== 'string' || disclosurePackage.address.length === 0) {
     check('prover_binding', false, 'Disclosure package has no address.');
   } else if (typeof report.prover !== 'string' || report.prover.length === 0) {
     check('prover_binding', false, 'Report has no prover commitment.');
-  } else if ((await sha256Hex(disclosurePackage.address)) !== report.prover) {
+  } else if (!(await addressMatchesCommitment(disclosurePackage.address, disclosurePackage.salt, report.prover))) {
     check('prover_binding', false, 'Disclosure address does not hash to the report prover commitment.');
   } else if (linked.length > 0) {
     const linkedProvers = Array.isArray(report.linkedProvers) ? report.linkedProvers : [];
-    const hashes = [];
-    for (const entry of linked) {
-      hashes.push(typeof entry?.address === 'string' && entry.address.length > 0 ? await sha256Hex(entry.address) : null);
+    const okays = [];
+    for (let i = 0; i < linked.length; i += 1) {
+      const entry = linked[i];
+      okays.push(
+        typeof entry?.address === 'string' && entry.address.length > 0
+          ? await addressMatchesCommitment(entry.address, entry.salt, linkedProvers[i])
+          : false,
+      );
     }
-    const bad = hashes.findIndex((h, i) => h === null || h !== linkedProvers[i]);
+    const bad = okays.findIndex((ok) => !ok);
     if (bad >= 0) {
       check('prover_binding', false, `Linked wallet ${bad} does not hash to the report linked-prover commitment.`);
     } else {
@@ -155,7 +167,13 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
             failure = `Claim ${claim.id} passed value differs (report: ${claim.passed}, re-run: ${again.passed}).`;
             break;
           }
-          if (String(again.value) !== String(claim.value)) {
+          if (String(again.threshold) !== String(claim.threshold)) {
+            failure = `Claim ${claim.id} threshold differs (report: ${claim.threshold}, re-run: ${again.threshold}).`;
+            break;
+          }
+          // Legacy reports (pre-P3) carry the exact value: it must
+          // match too. Predicate reports carry no value.
+          if (claim.value !== undefined && String(again.value) !== String(claim.value)) {
             failure = `Claim ${claim.id} value differs (report: ${claim.value}, re-run: ${again.value}).`;
             break;
           }
@@ -164,7 +182,14 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
       if (failure) {
         check('claims', false, failure);
       } else {
-        check('claims', true, `All ${report.claims.length} disclosed claim(s) reproduced exactly from the disclosure snapshot.`);
+        const predicate = report.claims.some((c) => c.value === undefined);
+        check(
+          'claims',
+          true,
+          predicate
+            ? `All ${report.claims.length} disclosed claim(s) reproduced as predicates from the disclosure snapshot (thresholds and pass/fail match; exact values verified privately).`
+            : `All ${report.claims.length} disclosed claim(s) reproduced exactly from the disclosure snapshot.`,
+        );
       }
     }
   } catch (err) {
@@ -172,6 +197,11 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
   }
 
   // f. The deterministic score, when present, recomputes exactly.
+  // Legacy reports (pre-P3) carry the exact value and per-component
+  // points: they must match exactly. Predicate reports carry only
+  // the version, band and component shapes: the recomputed exact
+  // score must fall in the public band. The exact value is never
+  // printed for a predicate report.
   try {
     if (report.score === null || report.score === undefined) {
       check('score', true, 'Report carries no score (not scored).');
@@ -182,15 +212,32 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
         noFailedWindowDays: policy.noFailedWindowDays,
       };
       const again = computeScore(bundle, windows, nowNs, report.score.version);
-      const same =
-        again.version === report.score.version &&
-        again.value === report.score.value &&
-        again.band === report.score.band &&
-        JSON.stringify(again.components) === JSON.stringify(report.score.components);
-      if (same) {
-        check('score', true, `Score recomputed exactly: ${again.value} (${again.band}).`);
+      const stripPoints = (components) =>
+        (components || []).map((c) => ({ id: c.id, label: c.label, max: c.max, measured: c.measured }));
+      let same = false;
+      let detail = '';
+      if (report.score.value !== undefined && report.score.value !== null) {
+        same =
+          again.version === report.score.version &&
+          again.value === report.score.value &&
+          again.band === report.score.band &&
+          JSON.stringify(again.components) === JSON.stringify(report.score.components);
+        detail = same
+          ? `Score recomputed exactly: ${again.value} (${again.band}).`
+          : `Score differs on re-run (report: ${report.score.value}, re-run: ${again.value}).`;
       } else {
-        check('score', false, `Score differs on re-run (report: ${report.score.value}, re-run: ${again.value}).`);
+        same =
+          again.version === report.score.version &&
+          again.band === report.score.band &&
+          JSON.stringify(stripPoints(again.components)) === JSON.stringify(stripPoints(report.score.components));
+        detail = same
+          ? `Score recomputed from the disclosure snapshot: band ${again.band} (matches the public band).`
+          : `Score band differs on re-run (report band: ${report.score.band}, re-run band: ${again.band}).`;
+      }
+      if (same) {
+        check('score', true, detail);
+      } else {
+        check('score', false, detail);
       }
     }
   } catch (err) {

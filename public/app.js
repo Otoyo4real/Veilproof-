@@ -30,8 +30,9 @@
 
 import { evaluateClaims } from './js/claims-engine.js';
 import { computeScore } from './js/score.js';
-import { buildReport, reportHash, evidenceHash, policyHash } from './js/report.js';
+import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, commitAddress } from './js/report.js';
 import { buildDisclosurePackage, buildMultiDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
+import { encryptDisclosurePackage, verifierKeyFingerprint } from './js/crypto-box.js';
 import { fetchAccountSnapshot, dataHashForSnapshots } from './js/onchain.js';
 import { sha256Hex, randomHex } from './js/crypto.js';
 import { buildLinkMessage, verifyLinkSignature } from './js/nep413.js';
@@ -818,9 +819,17 @@ async function buildReportAndHashes() {
     );
     const days = Number($('expirySelect').value);
     const expiresAt = computeExpiresAt(days);
-    const proverAddressHash = await sha256Hex(state.previewAddress);
+    // P2 unlinkability: a fresh random salt per report (and per linked
+    // wallet), so two reports from the same treasury get different
+    // commitments and cannot be matched from public data. The salts
+    // travel only inside the disclosure package, never in the report.
+    const proverSalt = newProverSalt();
+    const proverAddressHash = await commitAddress(state.previewAddress, proverSalt);
+    const linkedSalts = state.linkedWallets.map(() => newProverSalt());
     const linkedProverHashes = [];
-    for (const w of state.linkedWallets) linkedProverHashes.push(await sha256Hex(w.address));
+    for (let i = 0; i < state.linkedWallets.length; i += 1) {
+      linkedProverHashes.push(await commitAddress(state.linkedWallets[i].address, linkedSalts[i]));
+    }
     // The evidence data hash covers every wallet in the bundle (and
     // any balance samples); the single-wallet hash is only used when
     // there is one wallet and no samples.
@@ -836,15 +845,23 @@ async function buildReportAndHashes() {
       linkedProverHashes,
       score: state.score,
     });
-    // Tripwire: the public report must not contain any raw address or
-    // any transaction hash. If it ever did, refuse to show or publish it.
+    // Tripwire: the public report must not contain any raw address, any
+    // transaction hash, or any prover salt. If it ever did, refuse to
+    // show or publish it.
     const allAddresses = [state.previewAddress, ...state.linkedWallets.map((w) => w.address)];
     const allTxHashes = [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)].flatMap((s) => s.txs.map((t) => t.hash));
-    for (const addr of allAddresses) assertPublicReportClean(report, addr, allTxHashes);
+    const allSalts = [proverSalt, ...linkedSalts];
+    for (const addr of allAddresses) assertPublicReportClean(report, addr, allTxHashes, allSalts);
     const disclosurePackage =
       state.linkedWallets.length > 0
-        ? await buildMultiDisclosurePackage(report, state.previewAddress, state.snapshot, state.linkedWallets)
-        : await buildDisclosurePackage(report, state.previewAddress, state.snapshot);
+        ? await buildMultiDisclosurePackage(
+            report,
+            state.previewAddress,
+            state.snapshot,
+            state.linkedWallets.map((w, i) => ({ ...w, salt: linkedSalts[i] })),
+            proverSalt,
+          )
+        : await buildDisclosurePackage(report, state.previewAddress, state.snapshot, proverSalt);
     const hashes = {
       report_hash: await reportHash(report),
       evidence_hash: await evidenceHash(report.evidenceRefs),
@@ -856,11 +873,11 @@ async function buildReportAndHashes() {
     out.innerHTML =
       '<p class="ok">Report built. Clean check passed — the report contains no address and no transaction hash.</p>' +
       '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
-      '<p>Prover commitment (SHA-256 of the address — the address itself is never shown):<br><span class="mono">' +
+      '<p>Prover commitment (salted SHA-256 of the address — fresh salt per report, so two reports from the same treasury cannot be matched; the address itself is never shown):<br><span class="mono">' +
       esc(report.prover) + '</span></p>' +
       (report.linkedProvers.length > 0 ? '<p>Linked wallets: ' + report.linkedProvers.length + ' (commitments only).</p>' : '') +
       (report.score
-        ? '<p>Credit score: <strong>' + report.score.value + ' / 1000 (' + esc(report.score.band) + ')</strong> — recomputable by any app from the disclosure package.</p>'
+        ? '<p>Credit score: <strong>' + state.score.value + ' / 1000 (' + esc(report.score.band) + ')</strong> — your exact score; the public report carries only the band, recomputable by any app from the disclosure package.</p>'
         : '<p>Credit score: not scored.</p>') +
       '<p>AI summary: ' + (report.aiSummary === null ? 'Not analysed.' : esc(report.aiSummary.verdict ?? report.aiSummary.role ?? 'analysed') + ' (NEAR AI Cloud, advisory).') + '</p>' +
       '<p>Report hash: <span class="mono">' + esc(hashes.report_hash) + '</span></p>' +
@@ -869,6 +886,10 @@ async function buildReportAndHashes() {
       '<pre>' + esc(JSON.stringify(report, null, 2)) + '</pre>';
     $('downloadReportBtn').disabled = false;
     $('downloadDisclosureBtn').disabled = false;
+    $('encryptDisclosureBtn').disabled = false;
+    $('downloadEncryptedBtn').disabled = true;
+    state.encryptedDisclosurePackage = null;
+    $('encryptOut').innerHTML = '';
     $('publishCost').innerHTML =
       'Publishing attaches <strong>0.01 NEAR</strong> and a 100 TGas gas limit. ' +
       'The contract charges storage at cost (roughly 0.003–0.005 NEAR for a claim record) and refunds the excess deposit; ' +
@@ -878,6 +899,31 @@ async function buildReportAndHashes() {
     saveState();
   } catch (err) {
     out.innerHTML = '<p class="error">Report build failed: ' + esc(err.message) + '</p>';
+  }
+}
+
+// --- Verifier-bound disclosure (P4) ---
+// Seal the disclosure package for ONE verifier: only the holder of
+// that verifier's Curve25519 secret key can open it, and it expires
+// with the report. The sealed package is downloaded, never shown
+// on the page (it is ciphertext).
+async function encryptDisclosureForVerifier() {
+  const out = $('encryptOut');
+  try {
+    if (!state.report || !state.disclosurePackage) throw new Error('Build a report first.');
+    const key = $('verifierKeyInput').value.trim();
+    if (!key) throw new Error('Paste the verifier\'s encryption public key (base64) first.');
+    const encrypted = await encryptDisclosurePackage(state.disclosurePackage, key, state.report.expiresAt);
+    state.encryptedDisclosurePackage = encrypted;
+    const fingerprint = (await verifierKeyFingerprint(key)).slice(0, 16);
+    out.innerHTML =
+      '<p class="ok">Sealed for verifier key ' + esc(fingerprint) + '… — only that verifier can open it.</p>' +
+      '<p>Expires with the report: <span class="mono">' +
+      esc(new Date(Number(BigInt(state.report.expiresAt) / 1000000n)).toISOString()) + '</span></p>';
+    $('downloadEncryptedBtn').disabled = false;
+    saveState();
+  } catch (err) {
+    out.innerHTML = '<p class="err">Could not seal the disclosure package: ' + esc(err.message) + '</p>';
   }
 }
 
@@ -994,6 +1040,9 @@ function restoreUIFromState() {
       '<pre>' + esc(JSON.stringify(state.report, null, 2)) + '</pre>';
     $('downloadReportBtn').disabled = false;
     $('downloadDisclosureBtn').disabled = false;
+    $('encryptDisclosureBtn').disabled = !state.disclosurePackage;
+    $('downloadEncryptedBtn').disabled = true;
+    state.encryptedDisclosurePackage = null;
     $('publishCost').innerHTML =
       'Publishing attaches <strong>0.01 NEAR</strong> and a 100 TGas gas limit. ' +
       'The contract charges storage at cost and refunds the excess deposit. The wallet shows the exact amounts before you sign.';
@@ -1040,6 +1089,12 @@ window.addEventListener('load', async () => {
   $('downloadDisclosureBtn').addEventListener('click', () => {
     if (state.disclosurePackage) {
       download(`veilproof-disclosure-${state.disclosurePackage.reportId}.json`, state.disclosurePackage);
+    }
+  });
+  $('encryptDisclosureBtn').addEventListener('click', encryptDisclosureForVerifier);
+  $('downloadEncryptedBtn').addEventListener('click', () => {
+    if (state.encryptedDisclosurePackage) {
+      download(`veilproof-disclosure-encrypted-${state.report.reportId}.json`, state.encryptedDisclosurePackage);
     }
   });
   $('publishConfirm').addEventListener('change', () => {

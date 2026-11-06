@@ -29,7 +29,7 @@
   </div>
   <p id="demoStatus" class="muted"></p>
   <p>The demo loads a real published claim from the demo wallet and verifies it
-  against its onchain record — all seven checks should pass, including the
+  against its onchain record — all nine checks should pass, including the
   AI summary. The report proves claims about a wallet's onchain history — for
   example "balance at least 5 NEAR" — without revealing which wallet to the
   public.</p>
@@ -67,6 +67,15 @@ touched the chain. A report with no AI summary means "not analysed", not
   <label>Disclosure package JSON
   <textarea id="disclosureJson" placeholder='{"reportId": "...", "address": "...", "snapshot": {...}, "dataHash": "..."}'></textarea>
   </label>
+  <p class="muted">Sealed package? If the prover sent you an <em>encrypted</em> disclosure (version <span class="mono">veilproof-encrypted-disclosure-v1</span>), paste it here and put your verifier secret key below — the page opens it locally, in your browser, and rejects it if it has expired. Nothing is sent anywhere.</p>
+  <p>
+    <button id="genVerifierKeyBtn" type="button">Generate verifier keypair</button>
+    <span id="verifierKeyOut" class="muted"></span>
+  </p>
+  <label>Your verifier secret key (base64 — only needed for a sealed package; never share it)
+  <input id="verifierSecretKey" type="password" autocomplete="off" spellcheck="false" placeholder="Base64 Curve25519 secret key">
+  </label>
+  <p class="muted">Give the prover your <strong>public</strong> key (shown after generating) — never the secret key above.</p>
 </section>
 
 <section class="card">
@@ -241,6 +250,21 @@ touched the chain. A report with no AI summary means "not analysed", not
     }
     var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
     return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  // P2 unlinkability — inline mirror of src/report.js saltedAddressHash.
+  // Salted commitment: SHA-256 over (salt hex + address). The salt
+  // travels only in the disclosure package, never in the public report.
+  async function saltedAddressHash(salt, address) {
+    if (typeof salt !== 'string' || !/^[0-9a-f]{32}$/.test(salt)) return null;
+    if (typeof address !== 'string' || address.length === 0) return null;
+    return sha256Hex(salt + address);
+  }
+
+  async function addressMatchesCommitment(address, salt, commitment) {
+    if (salt === undefined || salt === null) return (await sha256Hex(address)) === commitment;
+    var h = await saltedAddressHash(salt, address);
+    return h !== null && h === commitment;
   }
 
   function hashedPayload(report) {
@@ -750,15 +774,17 @@ touched the chain. A report with no AI summary means "not analysed", not
       check('prover_binding', false, 'Disclosure package has no address.');
     } else if (typeof report.prover !== 'string' || report.prover.length === 0) {
       check('prover_binding', false, 'Report has no prover commitment.');
-    } else if ((await sha256Hex(disclosurePackage.address)) !== report.prover) {
+    } else if (!(await addressMatchesCommitment(disclosurePackage.address, disclosurePackage.salt, report.prover))) {
       check('prover_binding', false, 'Disclosure address does not hash to the report prover commitment.');
     } else if (linked.length > 0) {
       var linkedProvers = Array.isArray(report.linkedProvers) ? report.linkedProvers : [];
       var badLink = -1;
       for (var bi = 0; bi < linked.length; bi++) {
         var entryAddr = linked[bi] && linked[bi].address;
-        var entryHash = typeof entryAddr === 'string' && entryAddr.length > 0 ? await sha256Hex(entryAddr) : null;
-        if (entryHash === null || entryHash !== linkedProvers[bi]) { badLink = bi; break; }
+        var entryOk = typeof entryAddr === 'string' && entryAddr.length > 0
+          ? await addressMatchesCommitment(entryAddr, linked[bi].salt, linkedProvers[bi])
+          : false;
+        if (!entryOk) { badLink = bi; break; }
       }
       if (badLink >= 0) {
         check('prover_binding', false, 'Linked wallet ' + badLink + ' does not hash to the report linked-prover commitment.');
@@ -841,7 +867,13 @@ touched the chain. A report with no AI summary means "not analysed", not
               failure = 'Claim ' + claim.id + ' passed value differs (report: ' + claim.passed + ', re-run: ' + again.passed + ').';
               break;
             }
-            if (String(again.value) !== String(claim.value)) {
+            if (String(again.threshold) !== String(claim.threshold)) {
+              failure = 'Claim ' + claim.id + ' threshold differs (report: ' + claim.threshold + ', re-run: ' + again.threshold + ').';
+              break;
+            }
+            // Legacy reports (pre-P3) carry the exact value: it must
+            // match too. Predicate reports carry no value.
+            if (claim.value !== undefined && String(again.value) !== String(claim.value)) {
               failure = 'Claim ' + claim.id + ' value differs (report: ' + claim.value + ', re-run: ' + again.value + ').';
               break;
             }
@@ -850,7 +882,10 @@ touched the chain. A report with no AI summary means "not analysed", not
         if (failure) {
           check('claims', false, failure);
         } else {
-          check('claims', true, 'All ' + report.claims.length + ' disclosed claim(s) reproduced exactly from the disclosure snapshot.');
+          var predicate = report.claims.some(function (c) { return c.value === undefined; });
+          check('claims', true, predicate
+            ? 'All ' + report.claims.length + ' disclosed claim(s) reproduced as predicates from the disclosure snapshot (thresholds and pass/fail match; exact values verified privately).'
+            : 'All ' + report.claims.length + ' disclosed claim(s) reproduced exactly from the disclosure snapshot.');
         }
       }
     } catch (err) {
@@ -863,14 +898,31 @@ touched the chain. A report with no AI summary means "not analysed", not
       } else {
         var windows = { txWindowDays: policy.txWindowDays, volumeWindowDays: policy.volumeWindowDays, noFailedWindowDays: policy.noFailedWindowDays };
         var againScore = computeScore(bundle, windows, nowNs, report.score.version);
-        var sameScore = againScore.version === report.score.version &&
-          againScore.value === report.score.value &&
-          againScore.band === report.score.band &&
-          JSON.stringify(againScore.components) === JSON.stringify(report.score.components);
-        if (sameScore) {
-          check('score', true, 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').');
+        var stripPoints = function (components) {
+          return (components || []).map(function (c) { return { id: c.id, label: c.label, max: c.max, measured: c.measured }; });
+        };
+        var sameScore = false;
+        var scoreDetail = '';
+        if (report.score.value !== undefined && report.score.value !== null) {
+          sameScore = againScore.version === report.score.version &&
+            againScore.value === report.score.value &&
+            againScore.band === report.score.band &&
+            JSON.stringify(againScore.components) === JSON.stringify(report.score.components);
+          scoreDetail = sameScore
+            ? 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').'
+            : 'Score differs on re-run (report: ' + report.score.value + ', re-run: ' + againScore.value + ').';
         } else {
-          check('score', false, 'Score differs on re-run (report: ' + report.score.value + ', re-run: ' + againScore.value + ').');
+          sameScore = againScore.version === report.score.version &&
+            againScore.band === report.score.band &&
+            JSON.stringify(stripPoints(againScore.components)) === JSON.stringify(stripPoints(report.score.components));
+          scoreDetail = sameScore
+            ? 'Score recomputed from the disclosure snapshot: band ' + againScore.band + ' (matches the public band).'
+            : 'Score band differs on re-run (report band: ' + report.score.band + ', re-run band: ' + againScore.band + ').';
+        }
+        if (sameScore) {
+          check('score', true, scoreDetail);
+        } else {
+          check('score', false, scoreDetail);
         }
       }
     } catch (err) {
@@ -960,8 +1012,70 @@ touched the chain. A report with no AI summary means "not analysed", not
     computeDataHash: computeDataHash,
     evaluateClaims: evaluateClaims,
     verifyReport: verifyReport,
+    isEncryptedDisclosurePackage: isEncryptedDisclosurePackage,
+    openDisclosurePackage: openDisclosurePackage,
   };
   if (typeof window !== 'undefined') window.VeilProofVerify = api;
+
+  // --- Verifier-bound disclosure (P4), inline copy of src/crypto-box.js ---
+  // The verifier page can open a sealed disclosure package. The seal is
+  // an ephemeral-key nacl.box (sealed-box construction) to the verifier's
+  // Curve25519 public key; only the verifier's secret key opens it, and
+  // an expired package is rejected before decrypting. This is the same
+  // logic as src/crypto-box.js and public/js/crypto-box.js — the three
+  // copies must stay in sync, and the parity test in
+  // test/verify-report.test.mjs covers the verifier logic; the crypto-box
+  // parity test in test/frontend-parity.test.mjs covers the Node and
+  // browser-module copies.
+  var ENCRYPTED_DISCLOSURE_VERSION = 'veilproof-encrypted-disclosure-v1';
+  function bytesToBase64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+  function base64ToBytes(str, what) {
+    if (typeof str !== 'string' || str.length === 0) throw new Error('crypto-box: ' + what + ' must be a non-empty base64 string');
+    var s = atob(str);
+    var out = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+  function isEncryptedDisclosurePackage(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value) &&
+      value.version === ENCRYPTED_DISCLOSURE_VERSION &&
+      typeof value.ephemeralPublicKey === 'string' &&
+      typeof value.nonce === 'string' &&
+      typeof value.ciphertext === 'string' &&
+      typeof value.expiresAt === 'string';
+  }
+  function openDisclosurePackage(encryptedPackage, verifierSecretKeyBase64, nowNs) {
+    if (!encryptedPackage || typeof encryptedPackage !== 'object' || Array.isArray(encryptedPackage)) {
+      throw new Error('crypto-box: encrypted package must be an object');
+    }
+    if (encryptedPackage.version !== ENCRYPTED_DISCLOSURE_VERSION) {
+      throw new Error('crypto-box: unsupported encrypted package version ' + JSON.stringify(encryptedPackage.version));
+    }
+    var now = BigInt(nowNs);
+    var expires = BigInt(encryptedPackage.expiresAt);
+    if (expires <= now) throw new Error('crypto-box: disclosure package expired');
+    if (!globalThis.nacl || !globalThis.nacl.box || typeof globalThis.nacl.box.before !== 'function') {
+      throw new Error('crypto-box: tweetnacl (nacl.min.js) is not loaded');
+    }
+    var nacl = globalThis.nacl;
+    var verifierSecretKey = base64ToBytes(verifierSecretKeyBase64, 'verifier secret key');
+    if (verifierSecretKey.length !== nacl.box.publicKeyLength) throw new Error('crypto-box: verifier secret key must be a 32-byte Curve25519 key');
+    var ephemeralPublicKey = base64ToBytes(encryptedPackage.ephemeralPublicKey, 'ephemeral public key');
+    if (ephemeralPublicKey.length !== nacl.box.publicKeyLength) throw new Error('crypto-box: ephemeral public key must be a 32-byte Curve25519 key');
+    var nonce = base64ToBytes(encryptedPackage.nonce, 'nonce');
+    if (nonce.length !== nacl.box.nonceLength) throw new Error('crypto-box: nonce must be ' + nacl.box.nonceLength + ' bytes');
+    var ciphertext = base64ToBytes(encryptedPackage.ciphertext, 'ciphertext');
+    var shared = nacl.box.before(ephemeralPublicKey, verifierSecretKey);
+    var plaintext = nacl.box.open.after(ciphertext, nonce, shared);
+    if (plaintext === null) throw new Error('crypto-box: could not decrypt — wrong verifier key or tampered package');
+    var parsed = JSON.parse(new TextDecoder().decode(plaintext));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('crypto-box: decrypted package is not a disclosure package');
+    return parsed;
+  }
 
   // ================================================================
   // UI — runs only in a real browser.
@@ -1046,6 +1160,30 @@ touched the chain. A report with no AI summary means "not analysed", not
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // disclosure package alone). Transfer-linked wallets need no
+  // binding: the transfer itself is the proof.
+  async function fetchLinkKeyBindings(disclosurePackage) {
+    var bindings = {};
+    var linked = Array.isArray(disclosurePackage.linked) ? disclosurePackage.linked : [];
+    for (var i = 0; i < linked.length; i++) {
+      var entry = linked[i];
+      if (!entry || !entry.linkSignature || typeof entry.linkSignature !== 'object') continue;
+      var keys = await rpcAccessKeyList(entry.address);
+      var publicKey = entry.linkSignature.publicKey;
+      var found = false;
+      for (var k = 0; k < keys.length; k++) {
+        if (keys[k].public_key === publicKey) { found = true; break; }
+      }
+      if (found) bindings[entry.address] = publicKey;
+    }
+    return bindings;
+  }
+
+  function el(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   function renderCertificate(result, report, disclosurePackage, policy) {
     var banner = el('banner');
     banner.textContent = result.valid ? 'VALID — this report verifies.' : 'INVALID — this report does not verify.';
@@ -1054,10 +1192,13 @@ touched the chain. A report with no AI summary means "not analysed", not
       return '<div class="check ' + (c.passed ? 'pass' : 'fail') + '"><span class="mark">' +
         (c.passed ? '✓' : '✗') + ' ' + esc(c.check) + '</span><div class="detail">' + esc(c.detail) + '</div></div>';
     }).join('');
-    var claimsHtml = '<table><tr><th>Claim</th><th>Passed</th><th>Value</th><th>Threshold</th></tr>' +
+    // P3 predicate disclosure: the public report carries thresholds
+    // and bands only, so the table shows Claim / Passed / Threshold.
+    // Exact values live only in the private disclosure package and
+    // are never displayed here, even to the verifier.
+    var claimsHtml = '<table><tr><th>Claim</th><th>Passed</th><th>Threshold</th></tr>' +
       report.claims.map(function (c) {
-        return '<tr><td>' + esc(c.id) + '</td><td>' + (c.passed ? 'yes' : 'NO') + '</td><td class="mono">' +
-          esc(c.value) + '</td><td class="mono">' + esc(c.threshold) + '</td></tr>';
+        return '<tr><td>' + esc(c.id) + '</td><td>' + (c.passed ? 'yes' : 'NO') + '</td><td class="mono">' + esc(c.threshold) + '</td></tr>';
       }).join('') + '</table>';
     // What was NOT disclosed: claims the re-run finds that the report
     // does not list. The verifier holds the snapshot, so it can see
@@ -1086,7 +1227,7 @@ touched the chain. A report with no AI summary means "not analysed", not
       : 'Attached (see report JSON).';
     el('facts').innerHTML =
       '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
-      '<p>Prover commitment (SHA-256 of the wallet address — the address itself is never shown):<br><span class="mono">' + esc(report.prover) + '</span></p>' +
+      '<p>Prover commitment (salted SHA-256 of the wallet address — fresh salt per report, so two reports cannot be matched; the address itself is never shown):<br><span class="mono">' + esc(report.prover) + '</span></p>' +
       '<p>Policy version: <span class="mono">' + esc(report.policyVersion) + '</span></p>' +
       '<p>Created: <span class="mono">' + esc(report.createdAt) + '</span></p>' +
       '<p>Expires: <span class="mono">' + esc(expires) + '</span></p>' +
@@ -1114,6 +1255,24 @@ touched the chain. A report with no AI summary means "not analysed", not
       status.textContent = 'Could not parse pasted JSON: ' + err.message;
       status.className = 'error';
       return;
+    }
+    // P4: a sealed disclosure package opens here, in the browser, with
+    // the verifier's secret key — and only if it has not expired.
+    if (isEncryptedDisclosurePackage(disclosurePackage)) {
+      var secretKey = el('verifierSecretKey').value.trim();
+      if (!secretKey) {
+        status.textContent = 'This disclosure package is sealed for one verifier — paste your verifier secret key to open it.';
+        status.className = 'error';
+        return;
+      }
+      try {
+        disclosurePackage = openDisclosurePackage(disclosurePackage, secretKey, (BigInt(Date.now()) * 1000000n).toString());
+        status.textContent = 'Sealed package opened — verifying…';
+      } catch (err) {
+        status.textContent = 'Could not open the sealed disclosure package: ' + err.message;
+        status.className = 'error';
+        return;
+      }
     }
     status.textContent = 'Fetching the onchain record…';
     var record;
@@ -1161,6 +1320,19 @@ touched the chain. A report with no AI summary means "not analysed", not
     }
   }
   el('verifyBtn').addEventListener('click', runVerification);
+  el('genVerifierKeyBtn').addEventListener('click', function () {
+    var out = el('verifierKeyOut');
+    try {
+      if (!globalThis.nacl || !globalThis.nacl.box || typeof globalThis.nacl.box.keyPair !== 'function') {
+        throw new Error('tweetnacl (nacl.min.js) is not loaded');
+      }
+      var pair = globalThis.nacl.box.keyPair();
+      el('verifierSecretKey').value = bytesToBase64(pair.secretKey);
+      out.innerHTML = 'Your <strong>public</strong> key (give this to the prover): <span class="mono">' + esc(bytesToBase64(pair.publicKey)) + '</span><br>Your secret key is filled in above — keep it private, never share it.';
+    } catch (err) {
+      out.textContent = 'Could not generate a keypair: ' + err.message;
+    }
+  });
   el('demoBtn').addEventListener('click', async function () {
     var demoStatus = el('demoStatus');
     demoStatus.textContent = 'Loading the live demo claim…';

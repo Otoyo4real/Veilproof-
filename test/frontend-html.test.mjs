@@ -124,8 +124,10 @@ test('preview flow: paste an address to preview, wallet only to sign and publish
   assert.ok(!appJs.includes("$('loadDemoBtn').disabled = !connected"), 'demo load must not need a wallet');
   assert.ok(!appJs.includes("$('fetchSnapshotBtn').disabled = !connected"), 'snapshot fetch must not need a wallet');
   // The prover commitment, tripwire and disclosure must use the
-  // previewed address, not the connected wallet.
-  assert.ok(appJs.includes('sha256Hex(state.previewAddress)'), 'prover commitment must hash the previewed address');
+  // previewed address, not the connected wallet. Since P2 the
+  // commitment is salted (fresh salt per report), so the check is for
+  // commitAddress over the previewed address.
+  assert.ok(appJs.includes('commitAddress(state.previewAddress, proverSalt)'), 'prover commitment must hash the previewed address');
   assert.ok(appJs.includes('buildDisclosurePackage(report, state.previewAddress'), 'disclosure must use the previewed address');
 });
 

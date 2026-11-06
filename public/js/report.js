@@ -25,6 +25,31 @@ export { canonicalJson };
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const NON_NEG_INT_STRING = /^\d+$/;
 
+// P2 unlinkability — mirror of src/report.js. Same construction
+// (SHA-256 over salt hex + address), only the hash call is async
+// here because Web Crypto is async. The salt never appears in the
+// public report or onchain; it travels only in the disclosure package.
+export function newProverSalt() {
+  return randomHex(16);
+}
+
+const SALT_HEX = /^[0-9a-f]{32}$/;
+
+export async function saltedAddressHash(salt, address) {
+  if (typeof salt !== 'string' || !SALT_HEX.test(salt)) {
+    throw new Error('saltedAddressHash: salt must be 32 lowercase hex chars (16 random bytes)');
+  }
+  if (typeof address !== 'string' || address.length === 0) {
+    throw new Error('saltedAddressHash: address must be a non-empty string');
+  }
+  return sha256Hex(salt + address);
+}
+
+export async function commitAddress(address, salt) {
+  if (salt === undefined || salt === null) return sha256Hex(address);
+  return saltedAddressHash(salt, address);
+}
+
 function requireHexHash(value, label) {
   if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
     throw new Error(`report: ${label} must be a 64-char lowercase hex SHA-256, got ${JSON.stringify(value)}`);
@@ -116,6 +141,7 @@ export function buildReport({
   disclosedFields,
   linkedProverHashes = [],
   score = null,
+  includeExactValues = false,
 }) {
   requireHexHash(proverAddressHash, 'proverAddressHash');
   if (!Array.isArray(claims)) {
@@ -156,6 +182,29 @@ export function buildReport({
   const disclosedSet = new Set(disclosedIds);
   const disclosedClaims = claims.filter((c) => disclosedSet.has(c.id));
 
+  // P3 predicate disclosure — mirror of src/report.js: the public
+  // report carries thresholds and bands only. Exact claim values and
+  // the exact score (plus per-component points) are stripped here, at
+  // the one place a public report is built.
+  const publicClaims = includeExactValues
+    ? disclosedClaims
+    : disclosedClaims.map((c) => ({ id: c.id, passed: c.passed, threshold: c.threshold }));
+  const publicScore =
+    score === null
+      ? null
+      : includeExactValues
+        ? score
+        : {
+            version: score.version,
+            band: score.band,
+            components: score.components.map((comp) => ({
+              id: comp.id,
+              label: comp.label,
+              max: comp.max,
+              measured: comp.measured,
+            })),
+          };
+
   if (!Array.isArray(linkedProverHashes) || linkedProverHashes.some((h) => !SHA256_HEX.test(h))) {
     throw new Error('buildReport: linkedProverHashes must be an array of 64-char lowercase hex SHA-256 hashes');
   }
@@ -182,12 +231,12 @@ export function buildReport({
     prover: proverAddressHash,
     linkedProvers: [...linkedProverHashes],
     createdAt: new Date().toISOString(),
-    claims: disclosedClaims,
+    claims: publicClaims,
     policyVersion,
     aiSummary,
     evidenceRefs: { attestationRef: evidenceRefs.attestationRef, dataHash: evidenceRefs.dataHash },
     expiresAt,
     disclosed: disclosedClaims.map((c) => c.id),
-    score,
+    score: publicScore,
   };
 }
