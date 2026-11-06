@@ -21,6 +21,7 @@ import { evaluateClaims } from './claims-engine.js';
 import { dataHashForSnapshots } from './onchain.js';
 import { computeScore } from './score.js';
 import { reportHash, evidenceHash, policyHash } from './report.js';
+import { buildLinkMessage, verifyLinkSignature } from './nep413.js';
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -30,7 +31,7 @@ function shortHash(hash) {
   return typeof hash === 'string' ? hash : '(missing)';
 }
 
-export async function verifyReport({ report, onchainRecord, disclosurePackage, policy, nowNs }) {
+export async function verifyReport({ report, onchainRecord, disclosurePackage, policy, nowNs, linkKeyBindings }) {
   if (!isObject(report)) throw new Error('verifyReport: report must be an object');
   if (!isObject(onchainRecord)) throw new Error('verifyReport: onchainRecord must be an object');
   if (!isObject(disclosurePackage)) throw new Error('verifyReport: disclosurePackage must be an object');
@@ -180,7 +181,7 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
         volumeWindowDays: policy.volumeWindowDays,
         noFailedWindowDays: policy.noFailedWindowDays,
       };
-      const again = computeScore(bundle, windows, nowNs);
+      const again = computeScore(bundle, windows, nowNs, report.score.version);
       const same =
         again.version === report.score.version &&
         again.value === report.score.value &&
@@ -196,20 +197,57 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
     check('score', false, `Score re-run failed: ${err.message}`);
   }
 
-  // g. Every linked wallet proves ownership with a linking transfer.
+  // g. Every linked wallet proves ownership (transfer or signature).
   {
     if (linked.length === 0) {
       check('link_proofs', true, 'No linked wallets to prove.');
     } else {
       const allTxs = snapshots.flatMap((s) => s.txs || []);
-      const missing = linked.findIndex((entry) => {
-        const tx = allTxs.find((t) => t.hash === entry.linkTxHash);
-        return !tx || tx.senderId !== entry.address || tx.receiverId !== disclosurePackage.address || tx.status !== 'Success';
-      });
-      if (missing >= 0) {
-        check('link_proofs', false, `Linked wallet ${missing} has no successful linking transfer to the primary address.`);
+      const bindings = isObject(linkKeyBindings) ? linkKeyBindings : {};
+      let failure = null;
+      const methods = { transfer: 0, signature: 0 };
+      for (let i = 0; i < linked.length; i += 1) {
+        const entry = linked[i];
+        if (!entry || typeof entry !== 'object') {
+          failure = `Linked wallet ${i} has no link proof.`;
+          break;
+        }
+        if (typeof entry.linkTxHash === 'string' && entry.linkTxHash.length > 0) {
+          const tx = allTxs.find((t) => t.hash === entry.linkTxHash);
+          if (!tx || tx.senderId !== entry.address || tx.receiverId !== disclosurePackage.address || tx.status !== 'Success') {
+            failure = `Linked wallet ${i} has no successful linking transfer to the primary address.`;
+            break;
+          }
+          methods.transfer += 1;
+          continue;
+        }
+        if (entry.linkSignature && typeof entry.linkSignature === 'object') {
+          const sig = entry.linkSignature;
+          if (sig.message !== buildLinkMessage(entry.address, disclosurePackage.address)) {
+            failure = `Linked wallet ${i} signature is not the link statement for this pairing.`;
+            break;
+          }
+          if (bindings[entry.address] !== sig.publicKey) {
+            failure = `Linked wallet ${i} has no verified public key binding (the key was not confirmed against the chain access key list).`;
+            break;
+          }
+          if (!(await verifyLinkSignature(sig))) {
+            failure = `Linked wallet ${i} link signature does not verify.`;
+            break;
+          }
+          methods.signature += 1;
+          continue;
+        }
+        failure = `Linked wallet ${i} has no link proof (neither a linking transfer nor a link signature).`;
+        break;
+      }
+      if (failure) {
+        check('link_proofs', false, failure);
       } else {
-        check('link_proofs', true, `All ${linked.length} linked wallet(s) proved ownership by a transfer to the primary address.`);
+        const parts = [];
+        if (methods.transfer > 0) parts.push(`${methods.transfer} by transfer`);
+        if (methods.signature > 0) parts.push(`${methods.signature} by signature`);
+        check('link_proofs', true, `All ${linked.length} linked wallet(s) proved ownership (${parts.join(', ')}).`);
       }
     }
   }

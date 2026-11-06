@@ -4,6 +4,7 @@ target/
 .env
 .env.*
 .testnet-accounts.json
+.testnet-agent-keys.json
 *.log
 .DS_Store
 dist/

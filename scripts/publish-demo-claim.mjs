@@ -9,7 +9,7 @@
 //
 // Flow: snapshots (primary + linked wallet, balance sampled at past
 // block heights) -> claims under policy v2 (aggregate + sustained +
-// time-weighted) -> deterministic score-v1 -> REAL NEAR AI underwriting
+// time-weighted) -> deterministic score-v2 -> REAL NEAR AI underwriting
 // via the stored custom.near-ai-veilproof credential (helper, never
 // the key value) -> report (with score + attested underwriting summary)
 // -> tripwire -> publish hashes -> verify all 9 checks onchain ->
@@ -193,7 +193,7 @@ for (const c of evaluation.claims) console.log(`  claim ${c.id}: passed=${c.pass
 if (!evaluation.allPassed) fail('not all claims passed — refusing to publish a failing demo report');
 console.log('  PASS — all claims pass');
 
-console.log('[3/7] Compute deterministic score-v1');
+console.log('[3/7] Compute deterministic score-v2');
 const score = computeScore(bundle, {
   txWindowDays: POLICY.txWindowDays,
   volumeWindowDays: POLICY.volumeWindowDays,

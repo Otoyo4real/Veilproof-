@@ -179,10 +179,11 @@
     </label>
     <p class="muted">Linking more wallets aggregates their balances, volume and
     activity into one report — an agent's treasury is usually spread
-    across wallets. Each linked wallet proves ownership with a small
-    transfer to the primary address (below); only the key holder of
-    that wallet could have signed it.</p>
-    <label>Link transfer hash per linked wallet (one per line, same order)
+    across wallets. Each linked wallet proves ownership in one of two
+    ways: a small transfer to the primary address (below), or — no
+    transfer, no gas — by signing a short link statement. Leave the
+    hash blank for a wallet you will link by signature instead.</p>
+    <label>Link transfer hash per linked wallet (one per line, same order — blank = link by signature instead)
     <textarea id="linkedTxHashes" placeholder="hash of a transfer from the linked wallet to the primary address"></textarea>
     </label>
     <label>Balance history sampling
@@ -316,6 +317,7 @@
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/@fastnear/wallet@2.5.0/dist/umd/browser.global.js"></script>
+<script src="./js/nacl.min.js"></script>
 <script type="module" src="app.js"></script>
 <script type="module" src="demo.js"></script>
 </body>

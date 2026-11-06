@@ -18,6 +18,7 @@
 
 import { createHash } from 'node:crypto';
 import { canonicalJson } from './canonical.js';
+import { buildLinkMessage, verifyLinkSignature } from './nep413.js';
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -67,13 +68,21 @@ export function buildDisclosurePackage(report, address, snapshot) {
 }
 
 // Assemble the private disclosure package for a multi-wallet report.
-// linked is an array of { address, snapshot, linkTxHash } — one entry
-// per additional wallet. linkTxHash is the hash of the linking
-// transfer FROM that wallet TO the primary address: only the key
-// holder of the linked wallet could have signed it, so the transfer
-// itself is the ownership proof (verified by verify-report.js).
-// Each linked address must hash to an entry in report.linkedProvers,
-// and each linking transfer must appear among the disclosed txs.
+// linked is an array of { address, snapshot, linkTxHash } or
+// { address, snapshot, linkSignature } — one entry per additional
+// wallet, with exactly one proof per wallet:
+// - linkTxHash: the hash of the linking transfer FROM that wallet TO
+//   the primary address. Only the key holder of the linked wallet
+//   could have signed it, so the transfer itself is the ownership
+//   proof (verified by verify-report.js). Costs gas and leaves a
+//   public onchain record connecting the two wallets.
+// - linkSignature: a NEP-413 signature over the link statement for
+//   this exact pairing (see src/nep413.js). Same ownership proof,
+//   no transfer, no gas, no public onchain link between the wallets.
+//   The signature is verified cryptographically here (fail fast); the
+//   binding of its public key to the linked account is checked by
+//   the verifier via the chain's access key list (linkKeyBindings).
+// Each linked address must hash to an entry in report.linkedProvers.
 export function buildMultiDisclosurePackage(report, address, snapshot, linked = []) {
   const base = buildDisclosurePackage(report, address, snapshot);
   if (!Array.isArray(linked)) {
@@ -91,18 +100,42 @@ export function buildMultiDisclosurePackage(report, address, snapshot, linked = 
     if (sha256Hex(entry.address) !== linkedProvers[i]) {
       throw new Error(`buildMultiDisclosurePackage: linked[${i}].address does not hash to report.linkedProvers[${i}]`);
     }
-    if (typeof entry.linkTxHash !== 'string' || entry.linkTxHash.length === 0) {
-      throw new Error(`buildMultiDisclosurePackage: linked[${i}].linkTxHash must be a non-empty string`);
+    const hasTx = typeof entry.linkTxHash === 'string' && entry.linkTxHash.length > 0;
+    const hasSig = entry.linkSignature !== undefined && entry.linkSignature !== null;
+    if (hasTx === hasSig) {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}] must carry exactly one of linkTxHash or linkSignature`);
     }
-    const tx = entry.snapshot.txs.find((t) => t.hash === entry.linkTxHash);
-    if (!tx || tx.senderId !== entry.address || tx.receiverId !== address || tx.status !== 'Success') {
-      throw new Error(
-        `buildMultiDisclosurePackage: linked[${i}].linkTxHash is not a successful transfer from the linked wallet to the primary address`,
-      );
+    if (hasTx) {
+      const tx = entry.snapshot.txs.find((t) => t.hash === entry.linkTxHash);
+      if (!tx || tx.senderId !== entry.address || tx.receiverId !== address || tx.status !== 'Success') {
+        throw new Error(
+          `buildMultiDisclosurePackage: linked[${i}].linkTxHash is not a successful transfer from the linked wallet to the primary address`,
+        );
+      }
+      return {
+        address: entry.address,
+        linkTxHash: entry.linkTxHash,
+        snapshot: JSON.parse(JSON.stringify(entry.snapshot)),
+      };
+    }
+    const sig = entry.linkSignature;
+    if (!sig || typeof sig !== 'object') {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}].linkSignature must be an object`);
+    }
+    for (const field of ['message', 'nonce', 'recipient', 'signature', 'publicKey']) {
+      if (typeof sig[field] !== 'string' || sig[field].length === 0) {
+        throw new Error(`buildMultiDisclosurePackage: linked[${i}].linkSignature.${field} must be a non-empty string`);
+      }
+    }
+    if (sig.message !== buildLinkMessage(entry.address, address)) {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}].linkSignature.message is not the link statement for this pairing`);
+    }
+    if (!verifyLinkSignature(sig)) {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}].linkSignature does not verify`);
     }
     return {
       address: entry.address,
-      linkTxHash: entry.linkTxHash,
+      linkSignature: { ...sig },
       snapshot: JSON.parse(JSON.stringify(entry.snapshot)),
     };
   });

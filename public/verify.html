@@ -111,6 +111,7 @@ touched the chain. A report with no AI summary means "not analysed", not
 </footer>
 
 
+<script src="./js/nacl.min.js"></script>
 <script>
 (function () {
   'use strict';
@@ -142,6 +143,96 @@ touched the chain. A report with no AI summary means "not analysed", not
       return '{' + keys.map(function (k) { return JSON.stringify(k) + ':' + canonicalJson(value[k]); }).join(',') + '}';
     }
     throw new Error('canonicalJson: cannot serialise ' + typeof value);
+  }
+
+  // --- NEP-413 signed messages (mirror of public/js/nep413.js) ---
+  // A linked wallet can prove ownership by signing the link statement
+  // instead of sending a transfer. The signature is ed25519 over
+  // SHA-256 of the Borsh payload { tag: u32 2147484061, message,
+  // nonce: [u8; 32], recipient, callbackUrl: None }. ed25519 uses the
+  // vendored tweetnacl global (nacl.min.js, loaded above).
+  var NEP413_TAG = 2147484061;
+  var LINK_RECIPIENT = 'registry.veilproof.testnet';
+  var BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+  function base58Decode(str) {
+    var num = 0n;
+    for (var i = 0; i < str.length; i++) {
+      var idx = BASE58_ALPHABET.indexOf(str[i]);
+      if (idx === -1) throw new Error('nep413: invalid base58 character');
+      num = num * 58n + BigInt(idx);
+    }
+    var bytes = [];
+    while (num > 0n) { bytes.push(Number(num & 0xffn)); num >>= 8n; }
+    bytes.reverse();
+    var leading = 0;
+    while (leading < str.length && str[leading] === '1') leading += 1;
+    var out = new Uint8Array(leading + bytes.length);
+    for (var j = 0; j < bytes.length; j++) out[leading + j] = bytes[j];
+    return out;
+  }
+
+  function base64Decode(str) {
+    var bin = atob(str);
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function borshString(str) {
+    var utf8 = new TextEncoder().encode(str);
+    var out = new Uint8Array(4 + utf8.length);
+    new DataView(out.buffer).setUint32(0, utf8.length, true);
+    out.set(utf8, 4);
+    return out;
+  }
+
+  function concatBytes(parts) {
+    var total = 0;
+    parts.forEach(function (p) { total += p.length; });
+    var out = new Uint8Array(total);
+    var offset = 0;
+    parts.forEach(function (p) { out.set(p, offset); offset += p.length; });
+    return out;
+  }
+
+  function buildLinkMessage(linked, primary) {
+    return 'VeilProof link\nLinked wallet: ' + linked + '\nPrimary wallet: ' + primary;
+  }
+
+  function nep413PayloadBytes(message, nonceB64, recipient) {
+    var nonce = base64Decode(nonceB64);
+    if (nonce.length !== 32) throw new Error('nep413: nonce must be 32 bytes');
+    var tag = new Uint8Array(4);
+    new DataView(tag.buffer).setUint32(0, NEP413_TAG, true);
+    return concatBytes([tag, borshString(message), nonce, borshString(recipient), new Uint8Array([0])]);
+  }
+
+  function parsePublicKey(publicKey) {
+    if (typeof publicKey !== 'string' || publicKey.indexOf('ed25519:') !== 0) {
+      throw new Error('nep413: publicKey must be an ed25519: base58 key');
+    }
+    var raw = base58Decode(publicKey.slice('ed25519:'.length));
+    if (raw.length !== 32) throw new Error('nep413: publicKey must decode to 32 bytes');
+    return raw;
+  }
+
+  async function verifyLinkSignature(sig) {
+    try {
+      if (!sig || typeof sig !== 'object') return false;
+      if (sig.recipient !== LINK_RECIPIENT) return false;
+      if (typeof sig.signature !== 'string' || typeof sig.publicKey !== 'string') return false;
+      var payload = nep413PayloadBytes(sig.message, sig.nonce, sig.recipient);
+      var digest = new Uint8Array(await crypto.subtle.digest('SHA-256', payload));
+      var signature = base64Decode(sig.signature);
+      if (signature.length !== 64) return false;
+      var publicKey = parsePublicKey(sig.publicKey);
+      var nacl = globalThis.nacl;
+      if (!nacl || !nacl.sign || !nacl.sign.detached || typeof nacl.sign.detached.verify !== 'function') return false;
+      return nacl.sign.detached.verify(digest, signature, publicKey);
+    } catch (e) {
+      return false;
+    }
   }
 
   async function sha256Hex(str) {
@@ -469,7 +560,7 @@ touched the chain. A report with no AI summary means "not analysed", not
     return { claims: claims, allPassed: claims.every(function (c) { return c.passed; }) };
   }
 
-  // --- Score: mirror of src/score.js (score-v1) ---
+  // --- Score: mirror of src/score.js (score-v1 + score-v2) ---
   var YOCTO_PER_NEAR = 10n ** 24n;
 
   function tierPoints(valueYocto, tiers) {
@@ -502,8 +593,39 @@ touched the chain. A report with no AI summary means "not analysed", not
     return Object.keys(weeks).length;
   }
 
-  function computeScore(snapshotOrBundle, opts, nowNs) {
+  // Version rules — mirror of SCORE_RULES in src/score.js. v1 counts
+  // every tx; v2 counts external txs only for activity/volume and
+  // adds counterparty diversity.
+  var SCORE_RULES = {
+    'score-v1': {
+      sustained: { max: 300, tiers: [[0.1, 50], [0.5, 120], [1, 200], [5, 260], [10, 300]] },
+      timeWeighted: { max: 200, tiers: [[0.1, 40], [0.5, 80], [1, 130], [5, 170], [10, 200]] },
+      activity: { max: 200, tiers: [[1, 40], [3, 90], [10, 140], [30, 170]], spreadBonus: 30, externalOnly: false },
+      volume: { max: 150, tiers: [[0.1, 30], [0.5, 60], [1, 100], [5, 130], [10, 150]], externalOnly: false },
+      diversity: null
+    },
+    'score-v2': {
+      sustained: { max: 350, tiers: [[0.1, 60], [0.5, 140], [1, 230], [5, 300], [10, 350]] },
+      timeWeighted: { max: 150, tiers: [[0.1, 30], [0.5, 60], [1, 100], [5, 130], [10, 150]] },
+      activity: { max: 150, tiers: [[1, 30], [3, 70], [10, 105], [30, 130]], spreadBonus: 20, externalOnly: true },
+      volume: { max: 100, tiers: [[0.1, 20], [0.5, 40], [1, 70], [5, 90], [10, 100]], externalOnly: true },
+      diversity: { max: 100, tiers: [[1, 30], [2, 60], [4, 85], [10, 100]] }
+    }
+  };
+
+  function countTierPoints(count, tiers) {
+    var points = 0;
+    for (var i = 0; i < tiers.length; i++) {
+      if (count >= tiers[i][0]) points = tiers[i][1];
+    }
+    return points;
+  }
+
+  function computeScore(snapshotOrBundle, opts, nowNs, version) {
     if (opts === void 0) opts = {};
+    if (version === void 0) version = 'score-v2';
+    var rules = SCORE_RULES[version];
+    if (!rules) throw new Error('score: unknown version ' + version);
     var wallets = normalizeBundle(snapshotOrBundle);
     var components = [];
     function push(id, label, points, max, measured) {
@@ -519,14 +641,19 @@ touched the chain. A report with no AI summary means "not analysed", not
       var min = sampled.reduce(function (m, s) { return s.amount < m ? s.amount : m; }, sampled[0].amount);
       var total = sampled.reduce(function (acc, s) { return acc + s.amount; }, 0n);
       var avg = total / BigInt(sampled.length);
-      push('sustained_balance', 'Lowest sampled balance held', tierPoints(min, [[0.1, 50], [0.5, 120], [1, 200], [5, 260], [10, 300]]), 300, true);
-      push('time_weighted_balance', 'Average sampled balance', tierPoints(avg, [[0.1, 40], [0.5, 80], [1, 130], [5, 170], [10, 200]]), 200, true);
+      push('sustained_balance', 'Lowest sampled balance held', tierPoints(min, rules.sustained.tiers), rules.sustained.max, true);
+      push('time_weighted_balance', 'Average sampled balance', tierPoints(avg, rules.timeWeighted.tiers), rules.timeWeighted.max, true);
     } else {
-      push('sustained_balance', 'Lowest sampled balance held', 0, 300, false);
-      push('time_weighted_balance', 'Average sampled balance', 0, 200, false);
+      push('sustained_balance', 'Lowest sampled balance held', 0, rules.sustained.max, false);
+      push('time_weighted_balance', 'Average sampled balance', 0, rules.timeWeighted.max, false);
     }
     var txs = unionTxs(wallets);
     var now = nowNs === undefined ? null : BigInt(nowNs);
+    var own = {};
+    wallets.forEach(function (w) { own[w.account.accountId] = true; });
+    function isExternal(tx) {
+      return (own[tx.senderId] || own[tx.receiverId]) && (!own[tx.senderId] || !own[tx.receiverId]);
+    }
     if (opts.txWindowDays !== undefined && now !== null) {
       var days = opts.txWindowDays;
       if (typeof days !== 'number' || !Number.isInteger(days) || days < 0) throw new Error('score: txWindowDays must be a non-negative integer number of days');
@@ -535,30 +662,39 @@ touched the chain. A report with no AI summary means "not analysed", not
         var ts = BigInt(tx.blockTimestampNs);
         return ts >= start && ts <= now && tx.status === 'Success';
       });
-      var count = inWindow.length;
-      var weeks = distinctWeeks(inWindow.map(function (tx) { return tx.blockTimestampNs; }));
-      var points = count >= 30 ? 170 : count >= 10 ? 140 : count >= 3 ? 90 : count >= 1 ? 40 : 0;
-      if (weeks >= 3 && points > 0) points = Math.min(200, points + 30);
-      push('activity', 'Successful transactions and week spread', points, 200, true);
+      var counted = rules.activity.externalOnly ? inWindow.filter(isExternal) : inWindow;
+      var count = counted.length;
+      var weeks = distinctWeeks(counted.map(function (tx) { return tx.blockTimestampNs; }));
+      var points = countTierPoints(count, rules.activity.tiers);
+      if (weeks >= 3 && points > 0) points = Math.min(rules.activity.max, points + rules.activity.spreadBonus);
+      push('activity', 'Successful transactions and week spread', points, rules.activity.max, true);
+      if (rules.diversity) {
+        var counterparties = {};
+        counted.forEach(function (tx) {
+          if (tx.senderId && !own[tx.senderId]) counterparties[tx.senderId] = true;
+          if (tx.receiverId && !own[tx.receiverId]) counterparties[tx.receiverId] = true;
+        });
+        push('counterparty_diversity', 'Distinct outside counterparties', countTierPoints(Object.keys(counterparties).length, rules.diversity.tiers), rules.diversity.max, true);
+      }
     } else {
-      push('activity', 'Successful transactions and week spread', 0, 200, false);
+      push('activity', 'Successful transactions and week spread', 0, rules.activity.max, false);
+      if (rules.diversity) push('counterparty_diversity', 'Distinct outside counterparties', 0, rules.diversity.max, false);
     }
     if (opts.volumeWindowDays !== undefined && now !== null) {
       var vDays = opts.volumeWindowDays;
       if (typeof vDays !== 'number' || !Number.isInteger(vDays) || vDays < 0) throw new Error('score: volumeWindowDays must be a non-negative integer number of days');
       var vStart = now - BigInt(vDays) * NS_PER_DAY;
-      var ids = {};
-      wallets.forEach(function (w) { ids[w.account.accountId] = true; });
       var sum = 0n;
       txs.forEach(function (tx) {
         var ts = BigInt(tx.blockTimestampNs);
         if (ts < vStart || ts > now || tx.status !== 'Success') return;
-        if (!ids[tx.senderId] && !ids[tx.receiverId]) return;
+        if (!own[tx.senderId] && !own[tx.receiverId]) return;
+        if (rules.volume.externalOnly && !isExternal(tx)) return;
         sum += BigInt(tx.amountYocto);
       });
-      push('volume', 'Volume in window', tierPoints(sum, [[0.1, 30], [0.5, 60], [1, 100], [5, 130], [10, 150]]), 150, true);
+      push('volume', 'Volume in window', tierPoints(sum, rules.volume.tiers), rules.volume.max, true);
     } else {
-      push('volume', 'Volume in window', 0, 150, false);
+      push('volume', 'Volume in window', 0, rules.volume.max, false);
     }
     if (opts.noFailedWindowDays !== undefined && now !== null) {
       var fDays = opts.noFailedWindowDays;
@@ -574,7 +710,7 @@ touched the chain. A report with no AI summary means "not analysed", not
     }
     push('staked', 'Staked balance held', aggregateStaked(wallets) > 0n ? 50 : 0, 50, true);
     var value = components.reduce(function (sum, c) { return sum + c.points; }, 0);
-    return { version: 'score-v1', value: value, band: bandFor(value), components: components };
+    return { version: version, value: value, band: bandFor(value), components: components };
   }
 
   // --- Verify: mirror of src/verify-report.js ---
@@ -587,7 +723,7 @@ touched the chain. A report with no AI summary means "not analysed", not
   }
 
   async function verifyReport(args) {
-    var report = args.report, onchainRecord = args.onchainRecord, disclosurePackage = args.disclosurePackage, policy = args.policy, nowNs = args.nowNs;
+    var report = args.report, onchainRecord = args.onchainRecord, disclosurePackage = args.disclosurePackage, policy = args.policy, nowNs = args.nowNs, linkKeyBindings = args.linkKeyBindings;
     if (!isObject(report)) throw new Error('verifyReport: report must be an object');
     if (!isObject(onchainRecord)) throw new Error('verifyReport: onchainRecord must be an object');
     if (!isObject(disclosurePackage)) throw new Error('verifyReport: disclosurePackage must be an object');
@@ -726,7 +862,7 @@ touched the chain. A report with no AI summary means "not analysed", not
         check('score', true, 'Report carries no score (not scored).');
       } else {
         var windows = { txWindowDays: policy.txWindowDays, volumeWindowDays: policy.volumeWindowDays, noFailedWindowDays: policy.noFailedWindowDays };
-        var againScore = computeScore(bundle, windows, nowNs);
+        var againScore = computeScore(bundle, windows, nowNs, report.score.version);
         var sameScore = againScore.version === report.score.version &&
           againScore.value === report.score.value &&
           againScore.band === report.score.band &&
@@ -741,28 +877,55 @@ touched the chain. A report with no AI summary means "not analysed", not
       check('score', false, 'Score re-run failed: ' + err.message);
     }
 
-    (function () {
-      if (linked.length === 0) {
-        check('link_proofs', true, 'No linked wallets to prove.');
-      } else {
-        var allTxs = [];
-        snapshots.forEach(function (s) { (s.txs || []).forEach(function (t) { allTxs.push(t); }); });
-        var missing = -1;
-        for (var mi = 0; mi < linked.length; mi++) {
-          var entry = linked[mi];
-          var found = null;
-          for (var ti = 0; ti < allTxs.length; ti++) {
-            if (allTxs[ti].hash === entry.linkTxHash) { found = allTxs[ti]; break; }
+    // g. Every linked wallet proves ownership (transfer or signature).
+    if (linked.length === 0) {
+      check('link_proofs', true, 'No linked wallets to prove.');
+    } else {
+      var linkAllTxs = [];
+      snapshots.forEach(function (s) { (s.txs || []).forEach(function (t) { linkAllTxs.push(t); }); });
+      var linkBindings = isObject(linkKeyBindings) ? linkKeyBindings : {};
+      var linkFailure = null;
+      var linkTransferCount = 0, linkSignatureCount = 0;
+      for (var lpi = 0; lpi < linked.length; lpi++) {
+        var linkEntry = linked[lpi];
+        if (!linkEntry || typeof linkEntry !== 'object') { linkFailure = 'Linked wallet ' + lpi + ' has no link proof.'; break; }
+        if (typeof linkEntry.linkTxHash === 'string' && linkEntry.linkTxHash.length > 0) {
+          var linkFound = null;
+          for (var lti = 0; lti < linkAllTxs.length; lti++) {
+            if (linkAllTxs[lti].hash === linkEntry.linkTxHash) { linkFound = linkAllTxs[lti]; break; }
           }
-          if (!found || found.senderId !== entry.address || found.receiverId !== disclosurePackage.address || found.status !== 'Success') { missing = mi; break; }
+          if (!linkFound || linkFound.senderId !== linkEntry.address || linkFound.receiverId !== disclosurePackage.address || linkFound.status !== 'Success') {
+            linkFailure = 'Linked wallet ' + lpi + ' has no successful linking transfer to the primary address.'; break;
+          }
+          linkTransferCount += 1;
+          continue;
         }
-        if (missing >= 0) {
-          check('link_proofs', false, 'Linked wallet ' + missing + ' has no successful linking transfer to the primary address.');
-        } else {
-          check('link_proofs', true, 'All ' + linked.length + ' linked wallet(s) proved ownership by a transfer to the primary address.');
+        if (linkEntry.linkSignature && typeof linkEntry.linkSignature === 'object') {
+          var linkSig = linkEntry.linkSignature;
+          if (linkSig.message !== buildLinkMessage(linkEntry.address, disclosurePackage.address)) {
+            linkFailure = 'Linked wallet ' + lpi + ' signature is not the link statement for this pairing.'; break;
+          }
+          if (linkBindings[linkEntry.address] !== linkSig.publicKey) {
+            linkFailure = 'Linked wallet ' + lpi + ' has no verified public key binding (the key was not confirmed against the chain access key list).'; break;
+          }
+          if (!(await verifyLinkSignature(linkSig))) {
+            linkFailure = 'Linked wallet ' + lpi + ' link signature does not verify.'; break;
+          }
+          linkSignatureCount += 1;
+          continue;
         }
+        linkFailure = 'Linked wallet ' + lpi + ' has no link proof (neither a linking transfer nor a link signature).';
+        break;
       }
-    })();
+      if (linkFailure) {
+        check('link_proofs', false, linkFailure);
+      } else {
+        var linkParts = [];
+        if (linkTransferCount > 0) linkParts.push(linkTransferCount + ' by transfer');
+        if (linkSignatureCount > 0) linkParts.push(linkSignatureCount + ' by signature');
+        check('link_proofs', true, 'All ' + linked.length + ' linked wallet(s) proved ownership (' + linkParts.join(', ') + ').');
+      }
+    }
 
     (function () {
       var reasons = [];
@@ -837,6 +1000,45 @@ touched the chain. A report with no AI summary means "not analysed", not
     var bytes = json.result.result;
     var text = new TextDecoder().decode(new Uint8Array(bytes));
     return JSON.parse(text);
+  }
+
+  async function rpcAccessKeyList(accountId) {
+    var res = await fetch(RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'veilproof-access-keys',
+        method: 'query',
+        params: { request_type: 'view_access_key_list', account_id: accountId, finality: 'final' },
+      }),
+    });
+    var json = await res.json();
+    if (json.error) throw new Error(json.error.message || json.error.name || 'RPC error');
+    return json.result.keys || [];
+  }
+
+  // For signature-linked wallets, confirm the signature's public key
+  // against the chain's access key list. The binding map is passed to
+  // verifyReport, which fails the link_proofs check when a signature
+  // link has no verified binding (it never trusts the key in the
+  // disclosure package alone). Transfer-linked wallets need no
+  // binding: the transfer itself is the proof.
+  async function fetchLinkKeyBindings(disclosurePackage) {
+    var bindings = {};
+    var linked = Array.isArray(disclosurePackage.linked) ? disclosurePackage.linked : [];
+    for (var i = 0; i < linked.length; i++) {
+      var entry = linked[i];
+      if (!entry || !entry.linkSignature || typeof entry.linkSignature !== 'object') continue;
+      var keys = await rpcAccessKeyList(entry.address);
+      var publicKey = entry.linkSignature.publicKey;
+      var found = false;
+      for (var k = 0; k < keys.length; k++) {
+        if (keys[k].public_key === publicKey) { found = true; break; }
+      }
+      if (found) bindings[entry.address] = publicKey;
+    }
+    return bindings;
   }
 
   function el(id) { return document.getElementById(id); }
@@ -941,8 +1143,16 @@ touched the chain. A report with no AI summary means "not analysed", not
     };
     var nowNs = (BigInt(Date.now()) * 1000000n).toString();
     status.textContent = 'Verifying…';
+    var linkKeyBindings = {};
     try {
-      var result = await verifyReport({ report: report, onchainRecord: onchainRecord, disclosurePackage: disclosurePackage, policy: policy, nowNs: nowNs });
+      linkKeyBindings = await fetchLinkKeyBindings(disclosurePackage);
+    } catch (err) {
+      status.textContent = 'Could not fetch the linked wallets access keys: ' + err.message;
+      status.className = 'error';
+      return;
+    }
+    try {
+      var result = await verifyReport({ report: report, onchainRecord: onchainRecord, disclosurePackage: disclosurePackage, policy: policy, nowNs: nowNs, linkKeyBindings: linkKeyBindings });
       status.textContent = '';
       renderCertificate(result, report, disclosurePackage, policy);
     } catch (err) {

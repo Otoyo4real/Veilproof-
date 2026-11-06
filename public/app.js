@@ -34,6 +34,7 @@ import { buildReport, reportHash, evidenceHash, policyHash } from './js/report.j
 import { buildDisclosurePackage, buildMultiDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
 import { fetchAccountSnapshot, dataHashForSnapshots } from './js/onchain.js';
 import { sha256Hex, randomHex } from './js/crypto.js';
+import { buildLinkMessage, verifyLinkSignature } from './js/nep413.js';
 
 const NETWORK = 'testnet';
 const REGISTRY = 'registry.veilproof.testnet';
@@ -112,6 +113,7 @@ function saveState() {
         previewAddress: state.previewAddress,
         challenge: state.challenge,
         snapshot: state.snapshot,
+        suppliedTxCount: state.suppliedTxCount,
         linkedWallets: state.linkedWallets,
         policy: state.policy,
         evaluation: state.evaluation,
@@ -395,12 +397,17 @@ function parseLinkedAddresses() {
   return raw;
 }
 
+// One line per linked wallet, same order; a blank line means that
+// wallet will link by signature instead of by transfer (the user
+// signs the link statement in the snapshot step). Fewer lines than
+// addresses is fine (the rest are blanks); more is an error.
 function parseLinkTxHashes(count) {
-  const raw = $('linkedTxHashes').value.split('\n').map((l) => l.trim()).filter(Boolean);
-  if (raw.length !== count) {
-    throw new Error(`Expected ${count} link transfer hash(es), one per linked wallet, got ${raw.length}.`);
+  const raw = $('linkedTxHashes').value.split('\n').map((l) => l.trim());
+  if (raw.length > count) {
+    throw new Error(`Expected at most ${count} link transfer hash(es), one per linked wallet, got ${raw.length}.`);
   }
-  return raw;
+  while (raw.length < count) raw.push('');
+  return raw.map((h) => (h === '' ? null : h));
 }
 
 async function fetchSnapshot() {
@@ -415,11 +422,21 @@ async function fetchSnapshot() {
     out.innerHTML = '<p class="muted">Fetching account state for <span class="mono">' + esc(address) + '</span> and verifying ' + entries.length + ' transaction(s)…</p>';
     const snapshot = await fetchAccountSnapshot(address, entries, sampleOpts);
     state.snapshot = snapshot;
+    state.suppliedTxCount = entries.length;
+    // A signature link is tied to the (linked, primary) pair only, not
+    // to a snapshot, so a previously signed one survives a re-fetch.
+    const prevSignatures = {};
+    for (const w of state.linkedWallets) {
+      if (w.linkSignature) prevSignatures[w.address] = w.linkSignature;
+    }
     state.linkedWallets = [];
     // Linked wallets: their txs are the link transfer plus any tx
-    // lines in the box whose sender is that wallet. The link transfer
-    // must verify as a successful transfer to the primary address —
-    // that is the ownership proof for the linked wallet.
+    // lines in the box whose sender is that wallet. Ownership is
+    // proved either by the link transfer (a successful transfer to
+    // the primary address) or by a signature over the link statement
+    // — the signature route costs no gas and leaves no public
+    // onchain record connecting the wallets. A wallet with neither
+    // is kept and offered a "Sign link" button below.
     // Balance samples for linked wallets reuse the PRIMARY snapshot's
     // exact sample heights: the sustained/time-weighted claims refuse
     // to run when wallets were sampled at different heights, and two
@@ -432,35 +449,107 @@ async function fetchSnapshot() {
       const linkedAddress = linkedAddresses[i];
       const linkTxHash = linkHashes[i];
       const walletEntries = entries.filter((e) => e.senderId === linkedAddress);
-      if (!walletEntries.some((e) => e.hash === linkTxHash)) {
+      if (linkTxHash && !walletEntries.some((e) => e.hash === linkTxHash)) {
         walletEntries.push({ hash: linkTxHash, senderId: linkedAddress });
       }
       const linkedSnapshot = await fetchAccountSnapshot(linkedAddress, walletEntries, linkedSampleOpts);
-      const linkTx = linkedSnapshot.txs.find((t) => t.hash === linkTxHash);
-      if (!linkTx || linkTx.senderId !== linkedAddress || linkTx.receiverId !== address || linkTx.status !== 'Success') {
-        throw new Error(`Link transfer for ${linkedAddress} did not verify as a successful transfer to ${address}.`);
+      if (linkTxHash) {
+        const linkTx = linkedSnapshot.txs.find((t) => t.hash === linkTxHash);
+        if (!linkTx || linkTx.senderId !== linkedAddress || linkTx.receiverId !== address || linkTx.status !== 'Success') {
+          throw new Error(`Link transfer for ${linkedAddress} did not verify as a successful transfer to ${address}.`);
+        }
+        state.linkedWallets.push({ address: linkedAddress, snapshot: linkedSnapshot, linkTxHash });
+      } else if (prevSignatures[linkedAddress]) {
+        state.linkedWallets.push({ address: linkedAddress, snapshot: linkedSnapshot, linkSignature: prevSignatures[linkedAddress] });
+      } else {
+        state.linkedWallets.push({ address: linkedAddress, snapshot: linkedSnapshot });
       }
-      state.linkedWallets.push({ address: linkedAddress, snapshot: linkedSnapshot, linkTxHash });
     }
     invalidateReport('a new snapshot was fetched.');
-    const linkedLine = state.linkedWallets.length > 0
-      ? '<p>Linked wallets: ' + state.linkedWallets.map((w) => '<span class="mono">' + esc(w.address) + '</span>').join(', ') + ' (ownership proved by a transfer to the primary address).</p>'
-      : '';
-    const sampleLine = snapshot.balanceSamples
-      ? '<p>Balance samples: ' + snapshot.balanceSamples.length + ' readings over ' + sampleHours + 'h (lowest ' + esc(yoctoToNear(snapshot.balanceSamples.reduce((m, s) => (BigInt(s.amount) < BigInt(m) ? s.amount : m), snapshot.balanceSamples[0].amount))) + ' NEAR).</p>'
-      : '';
-    out.innerHTML =
-      '<p class="ok">Snapshot fetched for <span class="mono">' + esc(address) + '</span> at block ' + snapshot.blockHeight + '.</p>' +
-      '<p>Balance: <span class="mono">' + esc(yoctoToNear(snapshot.account.amount)) + ' NEAR</span> ' +
-      '(staked: <span class="mono">' + esc(yoctoToNear(snapshot.account.locked)) + ' NEAR</span>)</p>' +
-      '<p>Verified transactions: ' + snapshot.txs.length + ' of ' + entries.length + ' supplied ' +
-      '(unverifiable hashes are skipped).</p>' +
-      linkedLine + sampleLine +
-      '<p>Data hash: <span class="mono">' + esc(snapshot.dataHash) + '</span></p>';
+    renderSnapshot(snapshot, address, entries.length, sampleHours);
     updateWalletUI();
     saveState();
   } catch (err) {
     out.innerHTML = '<p class="error">Snapshot failed: ' + esc(err.message) + '</p>';
+  }
+}
+
+// Render the fetched snapshot, including the linked-wallet status and
+// a Sign link button for each wallet that still needs a link proof.
+// Re-run after a link is signed so the status line reflects it.
+function renderSnapshot(snapshot, address, entriesCount, sampleHours) {
+  const out = $('snapshotOut');
+  const linkedLine = state.linkedWallets.length > 0
+    ? '<p>Linked wallets: ' + state.linkedWallets.map((w) => {
+        const method = w.linkTxHash ? 'proved by transfer' : w.linkSignature ? 'proved by signature' : 'needs a link signature';
+        return '<span class="mono">' + esc(w.address) + '</span> (' + method + ')';
+      }).join(', ') + '.</p>' +
+      (state.linkedWallets.some((w) => !w.linkTxHash && !w.linkSignature)
+        ? '<p>For each wallet above that still needs a link: switch to that wallet in your wallet app, then press its Sign link button. No transfer, no gas — the signature is the proof.</p>' +
+          state.linkedWallets.map((w, i) => (!w.linkTxHash && !w.linkSignature
+            ? '<p><button type="button" data-sign-link="' + i + '">Sign link for ' + esc(w.address) + '</button> <span data-sign-link-out="' + i + '"></span></p>'
+            : '')).join('')
+        : '')
+    : '';
+  const sampleLine = snapshot.balanceSamples
+    ? '<p>Balance samples: ' + snapshot.balanceSamples.length + ' readings over ' + sampleHours + 'h (lowest ' + esc(yoctoToNear(snapshot.balanceSamples.reduce((m, s) => (BigInt(s.amount) < BigInt(m) ? s.amount : m), snapshot.balanceSamples[0].amount))) + ' NEAR).</p>'
+    : '';
+  out.innerHTML =
+    '<p class="ok">Snapshot fetched for <span class="mono">' + esc(address) + '</span> at block ' + snapshot.blockHeight + '.</p>' +
+    '<p>Balance: <span class="mono">' + esc(yoctoToNear(snapshot.account.amount)) + ' NEAR</span> ' +
+    '(staked: <span class="mono">' + esc(yoctoToNear(snapshot.account.locked)) + ' NEAR</span>)</p>' +
+    '<p>Verified transactions: ' + snapshot.txs.length + ' of ' + entriesCount + ' supplied ' +
+    '(unverifiable hashes are skipped).</p>' +
+    linkedLine + sampleLine +
+    '<p>Data hash: <span class="mono">' + esc(snapshot.dataHash) + '</span></p>';
+  out.querySelectorAll('[data-sign-link]').forEach((btn) => {
+    btn.addEventListener('click', () => signLink(Number(btn.getAttribute('data-sign-link'))));
+  });
+}
+
+// Sign the link statement for one linked wallet (no transfer, no gas).
+// The user switches to that wallet in their wallet app first — the
+// wallet signs the statement, and the app checks the signature twice:
+// the returned public key must be one of the linked account's access
+// keys, and the NEP-413 signature must verify against that key.
+async function signLink(index) {
+  const entry = state.linkedWallets[index];
+  const outSpan = document.querySelector(`[data-sign-link-out="${index}"]`);
+  if (!entry) return;
+  const setOut = (html) => { if (outSpan) outSpan.innerHTML = html; };
+  try {
+    const nw = fastnear();
+    const nonceBytes = new Uint8Array(32);
+    globalThis.crypto.getRandomValues(nonceBytes);
+    let bin = '';
+    nonceBytes.forEach((b) => { bin += String.fromCharCode(b); });
+    const nonce = btoa(bin);
+    const message = buildLinkMessage(entry.address, state.previewAddress);
+    setOut('<span class="muted">Waiting for the wallet to sign… (switch to ' + esc(entry.address) + ' in your wallet app first.)</span>');
+    const result = await nw.signMessage({ message, recipient: REGISTRY, nonce });
+    const signature = result?.signature ?? result?.signedMessage?.signature ?? null;
+    const publicKey = result?.publicKey ?? result?.signedMessage?.publicKey ?? null;
+    if (!signature || !publicKey) {
+      setOut('<span class="error">The wallet did not return a signature and public key — the link was not proved.</span>');
+      return;
+    }
+    const keys = await rpcViewAccessKeyList(entry.address);
+    if (!keys.some((k) => k.public_key === publicKey)) {
+      setOut('<span class="error">Public key ' + esc(publicKey) + ' is NOT one of ' + esc(entry.address) + ' access keys — the link was not proved. Switch to that wallet and try again.</span>');
+      return;
+    }
+    const linkSignature = { message, nonce, recipient: REGISTRY, signature, publicKey };
+    if (!(await verifyLinkSignature(linkSignature))) {
+      setOut('<span class="error">The signature did not verify — the link was not proved.</span>');
+      return;
+    }
+    entry.linkSignature = linkSignature;
+    invalidateReport('a link was signed.');
+    saveState();
+    renderSnapshot(state.snapshot, state.previewAddress, state.suppliedTxCount ?? state.snapshot.txs.length, Number($('sampleWindow').value));
+    updateWalletUI();
+  } catch (err) {
+    setOut('<span class="error">Link signing failed: ' + esc(err.message) + '</span>');
   }
 }
 
@@ -555,7 +644,7 @@ function renderClaims() {
       .join('');
   const score = state.score;
   $('scoreOut').innerHTML = score
-    ? '<h3>Portable credit score (score-v1)</h3>' +
+    ? '<h3>Portable credit score (' + esc(score.version) + ')</h3>' +
       '<p><strong>' + score.value + ' / 1000 — ' + esc(score.band) + '</strong></p>' +
       '<p class="muted">Deterministic and recomputable: any app holding the disclosure package can re-run the same published rules and get this exact number. That is what makes it reusable across apps.</p>' +
       '<table><tr><th>Component</th><th>Points</th><th>Measured</th></tr>' +

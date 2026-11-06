@@ -12,6 +12,8 @@ import { computeDataHash, dataHashForSnapshots } from '../src/onchain.js';
 import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
 import { buildDisclosurePackage, buildMultiDisclosurePackage } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
+import { signLinkMessage, buildLinkMessage, base58Encode } from '../src/nep413.js';
+import nacl from 'tweetnacl';
 
 const ADDRESS = 'alice.veilproof.testnet';
 const NOW_NS = 1793961600000000000n;
@@ -283,9 +285,20 @@ function loadPageVerify() {
     // only has the JS intrinsics, so provide them explicitly.
     TextEncoder: globalThis.TextEncoder,
     TextDecoder: globalThis.TextDecoder,
+    atob: globalThis.atob,
+    btoa: globalThis.btoa,
     console,
   };
   vm.createContext(sandbox);
+  // In a browser self === window === the global object; mirror that
+  // so the UMD build of tweetnacl (which writes to self.nacl) lands
+  // on the vm global, where globalThis.nacl finds it.
+  sandbox.self = sandbox;
+  // Load the vendored tweetnacl INSIDE the vm realm, exactly as the
+  // browser loads nacl.min.js via a <script> tag: tweetnacl checks
+  // `instanceof Uint8Array`, which fails across realms, so the page
+  // and nacl must share one realm (in production they always do).
+  vm.runInContext(readFileSync(new URL('../public/js/nacl.min.js', import.meta.url), 'utf8'), sandbox);
   vm.runInContext(match[1], sandbox);
   assert.ok(sandbox.window.VeilProofVerify, 'page script must expose window.VeilProofVerify');
   return sandbox.window.VeilProofVerify;
@@ -342,6 +355,54 @@ test('parity: page copy agrees with the Node module', async () => {
   }
 });
 
+test('parity: page copy agrees with the Node module on a signature link', async () => {
+  const page = loadPageVerify();
+  const primary = snapshot();
+  const linkedSnap = {
+    account: { accountId: 'bob.veilproof.testnet', amount: '3000000000000000000000000', locked: '0', storage_usage: 1000, blockHeight: 100 },
+    txs: [],
+    blockHeight: 100,
+    dataHash: computeDataHash('bob.veilproof.testnet', '3000000000000000000000000', '0', []),
+  };
+  const dataHash = dataHashForSnapshots([primary, linkedSnap]);
+  const bundle = { wallets: [primary, linkedSnap] };
+  const policy = { ...POLICY, aggregateBalanceAtLeastYocto: '8000000000000000000000000' };
+  const { claims } = evaluateClaims(bundle, policy, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: sha256Hex(ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    linkedProverHashes: [sha256Hex('bob.veilproof.testnet')],
+  });
+  const record = {
+    report_hash: reportHash(report),
+    evidence_hash: evidenceHash(report.evidenceRefs),
+    policy_hash: policyHash(POLICY_VERSION, policy),
+    valid: true,
+  };
+  const keyPair = nacl.sign.keyPair();
+  const nonceB64 = Buffer.from(new Uint8Array(32)).toString('base64');
+  const sig = signLinkMessage(keyPair.secretKey, 'bob.veilproof.testnet', ADDRESS, nonceB64);
+  const disclosure = buildMultiDisclosurePackage(report, ADDRESS, primary, [
+    { address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkSignature: sig },
+  ]);
+  const bindings = { 'bob.veilproof.testnet': sig.publicKey };
+  const args = { report, onchainRecord: record, disclosurePackage: disclosure, policy, nowNs: NOW_NS, linkKeyBindings: bindings };
+  const nodeResult = verifyReport(args);
+  const pageResult = await page.verifyReport(args);
+  assert.equal(JSON.stringify(pageResult), JSON.stringify(nodeResult), 'page and Node disagree on a signature link');
+  assert.equal(nodeResult.valid, true);
+  // And without the binding both agree it fails.
+  const noBindingArgs = { ...args, linkKeyBindings: undefined };
+  const nodeBad = verifyReport(noBindingArgs);
+  const pageBad = await page.verifyReport(noBindingArgs);
+  assert.equal(JSON.stringify(pageBad), JSON.stringify(nodeBad), 'page and Node disagree on a missing binding');
+  assert.equal(nodeBad.valid, false);
+});
+
 test('verify score: a scored report recomputes exactly; a tampered score fails', () => {
   const { report, onchainRecord, disclosurePackage, policy, nowNs } = genuine();
   const snap = disclosurePackage.snapshot;
@@ -366,6 +427,23 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   assert.equal(bad.valid, false);
   assert.equal(checkByName(bad, 'score').passed, false);
   assert.equal(checkByName(bad, 'report_hash').passed, true);
+  // A v1-scored report recomputes under v1 (and must NOT be
+  // recomputed under v2 — the version field picks the rules).
+  const scoreV1 = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, nowNs, 'score-v1');
+  const scoredV1 = buildReport({
+    proverAddressHash: report.prover,
+    claims: report.claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: report.evidenceRefs,
+    expiresAt: EXPIRES_AT,
+    score: scoreV1,
+  });
+  const recordV1 = onchainRecordFor(scoredV1);
+  const okV1 = verifyReport({ report: scoredV1, onchainRecord: recordV1, disclosurePackage, policy, nowNs });
+  assert.equal(okV1.valid, true);
+  assert.equal(checkByName(okV1, 'score').passed, true);
+  assert.equal(checkByName(okV1, 'score').detail, `Score recomputed exactly: ${scoreV1.value} (${scoreV1.band}).`);
 });
 
 test('verify multi-wallet: aggregate claims + link proofs verify; a fake link fails', () => {
@@ -408,6 +486,84 @@ test('verify multi-wallet: aggregate claims + link proofs verify; a fake link fa
   const bad = verifyReport({ report, onchainRecord: record, disclosurePackage: wrongLink, policy, nowNs: NOW_NS });
   assert.equal(bad.valid, false);
   assert.equal(checkByName(bad, 'link_proofs').passed, false);
+});
+
+test('verify multi-wallet: signature link verifies with a key binding; no binding or bad signature fails', () => {
+  const primary = snapshot();
+  const linkedSnap = {
+    account: { accountId: 'bob.veilproof.testnet', amount: '3000000000000000000000000', locked: '0', storage_usage: 1000, blockHeight: 100 },
+    txs: [],
+    blockHeight: 100,
+    dataHash: computeDataHash('bob.veilproof.testnet', '3000000000000000000000000', '0', []),
+  };
+  const dataHash = dataHashForSnapshots([primary, linkedSnap]);
+  const bundle = { wallets: [primary, linkedSnap] };
+  const policy = { ...POLICY, aggregateBalanceAtLeastYocto: '8000000000000000000000000' };
+  const { claims } = evaluateClaims(bundle, policy, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: sha256Hex(ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    linkedProverHashes: [sha256Hex('bob.veilproof.testnet')],
+  });
+  const record = {
+    report_hash: reportHash(report),
+    evidence_hash: evidenceHash(report.evidenceRefs),
+    policy_hash: policyHash(POLICY_VERSION, policy),
+    valid: true,
+  };
+  const keyPair = nacl.sign.keyPair();
+  const nonceB64 = Buffer.from(new Uint8Array(32)).toString('base64');
+  const sig = signLinkMessage(keyPair.secretKey, 'bob.veilproof.testnet', ADDRESS, nonceB64);
+  const bindings = { 'bob.veilproof.testnet': sig.publicKey };
+  const disclosure = buildMultiDisclosurePackage(report, ADDRESS, primary, [
+    { address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkSignature: sig },
+  ]);
+  const args = { report, onchainRecord: record, disclosurePackage: disclosure, policy, nowNs: NOW_NS, linkKeyBindings: bindings };
+  const ok = verifyReport(args);
+  assert.equal(ok.valid, true);
+  assert.equal(checkByName(ok, 'link_proofs').passed, true);
+  assert.match(checkByName(ok, 'link_proofs').detail, /by signature/);
+  // No key binding: the verifier must not trust the key in the
+  // disclosure package alone, so link_proofs fails and only it fails.
+  const noBinding = verifyReport({ ...args, linkKeyBindings: undefined });
+  assert.equal(noBinding.valid, false);
+  assert.equal(checkByName(noBinding, 'link_proofs').passed, false);
+  assert.equal(checkByName(noBinding, 'data_hash').passed, true);
+  // A binding for a DIFFERENT key fails the same way.
+  const otherKey = nacl.sign.keyPair();
+  const wrongBinding = verifyReport({
+    ...args,
+    linkKeyBindings: { 'bob.veilproof.testnet': `ed25519:${base58Encode(otherKey.publicKey)}` },
+  });
+  assert.equal(checkByName(wrongBinding, 'link_proofs').passed, false);
+  // A signature for a different pairing is rejected at build time.
+  const wrongPairSig = signLinkMessage(keyPair.secretKey, 'bob.veilproof.testnet', 'mallory.veilproof.testnet', nonceB64);
+  assert.throws(
+    () => buildMultiDisclosurePackage(report, ADDRESS, primary, [{ address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkSignature: wrongPairSig }]),
+    /link statement for this pairing/,
+  );
+  // A message tampered after signing is rejected the same way (the
+  // message must be the link statement for this pairing).
+  const tamperedMsg = { ...sig, message: buildLinkMessage('bob.veilproof.testnet', ADDRESS) + '!' };
+  assert.throws(
+    () => buildMultiDisclosurePackage(report, ADDRESS, primary, [{ address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkSignature: tamperedMsg }]),
+    /link statement for this pairing/,
+  );
+  // A signature swapped for another key's is rejected cryptographically.
+  const otherSig = signLinkMessage(otherKey.secretKey, 'bob.veilproof.testnet', ADDRESS, nonceB64);
+  assert.throws(
+    () => buildMultiDisclosurePackage(report, ADDRESS, primary, [{ address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkSignature: { ...sig, signature: otherSig.signature } }]),
+    /does not verify/,
+  );
+  // Both proofs at once is a caller error.
+  assert.throws(
+    () => buildMultiDisclosurePackage(report, ADDRESS, primary, [{ address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkTxHash: 'L'.repeat(43), linkSignature: sig }]),
+    /exactly one of/,
+  );
 });
 
 test('verify old reports: no score and no linked wallets still verify', () => {

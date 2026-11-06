@@ -10,9 +10,14 @@ import { createHash } from 'node:crypto';
 import { evaluateClaims } from '../src/claims-engine.js';
 import { computeDataHash } from '../src/onchain.js';
 import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
-import { buildDisclosurePackage } from '../src/disclosure.js';
+import { buildDisclosurePackage, buildMultiDisclosurePackage } from '../src/disclosure.js';
 import { verifyReport as nodeVerifyReport } from '../src/verify-report.js';
 import { verifyReport as browserVerifyReport } from '../public/js/verify-browser.js';
+import { buildMultiDisclosurePackage as browserBuildMultiDisclosurePackage } from '../public/js/disclosure.js';
+import { signLinkMessage } from '../src/nep413.js';
+import nacl from 'tweetnacl';
+
+globalThis.nacl = nacl;
 
 const ADDRESS = 'alice.veilproof.testnet';
 const NOW_NS = 1793961600000000000n;
@@ -157,4 +162,51 @@ test('browser verify module throws on malformed input, like the Node module', as
   await assert.rejects(() => browserVerifyReport({ ...base, report: null }), /report must be an object/);
   await assert.rejects(() => browserVerifyReport({ ...base, policy: null }), /policy must be an object/);
   await assert.rejects(() => browserVerifyReport({ ...base, nowNs: 'not-a-number' }), /nowNs must be a nanosecond epoch/);
+});
+
+test('browser verify module agrees with the Node module on a signature link', async () => {
+  const primary = snapshot();
+  const linkedSnap = {
+    account: { accountId: 'bob.veilproof.testnet', amount: '3000000000000000000000000', locked: '0', storage_usage: 1000, blockHeight: 100 },
+    txs: [],
+    blockHeight: 100,
+    dataHash: computeDataHash('bob.veilproof.testnet', '3000000000000000000000000', '0', []),
+  };
+  const { dataHashForSnapshots } = await import('../src/onchain.js');
+  const dataHash = dataHashForSnapshots([primary, linkedSnap]);
+  const bundle = { wallets: [primary, linkedSnap] };
+  const policy = { ...POLICY, aggregateBalanceAtLeastYocto: '8000000000000000000000000' };
+  const { claims } = evaluateClaims(bundle, policy, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: sha256Hex(ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    linkedProverHashes: [sha256Hex('bob.veilproof.testnet')],
+  });
+  const record = {
+    report_hash: reportHash(report),
+    evidence_hash: evidenceHash(report.evidenceRefs),
+    policy_hash: policyHash(POLICY_VERSION, policy),
+    valid: true,
+  };
+  const keyPair = nacl.sign.keyPair();
+  const nonceB64 = Buffer.from(new Uint8Array(32)).toString('base64');
+  const sig = signLinkMessage(keyPair.secretKey, 'bob.veilproof.testnet', ADDRESS, nonceB64);
+  const bindings = { 'bob.veilproof.testnet': sig.publicKey };
+  // The browser disclosure builder must accept the signature link too.
+  const browserDisclosure = await browserBuildMultiDisclosurePackage(report, ADDRESS, primary, [
+    { address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkSignature: sig },
+  ]);
+  const nodeDisclosure = buildMultiDisclosurePackage(report, ADDRESS, primary, [
+    { address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkSignature: sig },
+  ]);
+  assert.deepEqual(browserDisclosure, nodeDisclosure);
+  const args = { report, onchainRecord: record, disclosurePackage: browserDisclosure, policy, nowNs: NOW_NS, linkKeyBindings: bindings };
+  const nodeResult = nodeVerifyReport(args);
+  const browserResult = await browserVerifyReport(args);
+  assert.equal(JSON.stringify(browserResult), JSON.stringify(nodeResult), 'browser module and Node disagree on a signature link');
+  assert.equal(nodeResult.valid, true);
 });
