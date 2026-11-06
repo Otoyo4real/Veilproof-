@@ -1,1 +1,18 @@
-{"description":"Prove onchain financial claims without revealing the wallet","engines":{"node":">=20"},"name":"veilproof","private":true,"scripts":{"test":"node --test"},"type":"module","version":"0.1.0","dependencies":{"near-api-js":"^5.1.1","tweetnacl":"^1.0.3"}}
+{
+  "description": "Prove onchain financial claims without revealing the wallet",
+  "engines": {
+    "node": ">=20"
+  },
+  "name": "veilproof",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "demo": "node scripts/demo.mjs"
+  },
+  "type": "module",
+  "version": "0.1.0",
+  "dependencies": {
+    "near-api-js": "^5.1.1",
+    "tweetnacl": "^1.0.3"
+  }
+}
