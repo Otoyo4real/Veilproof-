@@ -515,16 +515,23 @@ async function runAiAnalysis() {
 
 // The contract's expires_at is a u64 nanosecond timestamp, and the
 // wallet passes it as a JSON number. JS numbers cannot hold every
-// 64-bit integer exactly, so the expiry is rounded DOWN to a multiple
-// of 1024 ns: multiples of 1024 below 2^63 are exactly representable
-// as doubles, and the round-trip is asserted before publishing. The
-// report carries this same rounded value, so the report and the
-// onchain record agree exactly.
+// 64-bit integer exactly, so the expiry is rounded DOWN to a whole
+// second (a multiple of 10^9 ns). Whole seconds are exactly
+// representable as doubles at current timestamps, and the exactness is
+// asserted before publishing. The report carries this same rounded
+// value, so the report and the onchain record agree exactly.
+// NOTE: the old code rounded to 1024 ns and asserted with
+// BigInt(Number(x).toString()). That check goes through the double's
+// shortest decimal string, which drops low digits at current
+// timestamps (e.g. ...9808 becomes "...9800"), so it threw on every
+// real report build. The check below compares the double's exact value
+// instead, and the demo script uses the same whole-second alignment
+// (scripts/demo-e2e.mjs).
 function computeExpiresAt(days) {
   const nowNs = BigInt(Date.now()) * 1000000n;
   const expires = nowNs + BigInt(days) * 86400n * 1000000000n;
-  const aligned = expires - (expires % 1024n);
-  if (BigInt(Number(aligned).toString()) !== aligned) {
+  const aligned = expires - (expires % 1000000000n);
+  if (BigInt(Number(aligned)) !== aligned) {
     throw new Error('expiry timestamp is not exactly representable as a JSON number — refusing to publish');
   }
   return aligned.toString();
