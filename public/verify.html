@@ -4,39 +4,36 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VeilProof — Verify a report</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #1a1a1a; }
-  h1 { font-size: 1.5rem; }
-  textarea, input { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 0.5rem; margin: 0.25rem 0 1rem; }
-  textarea { min-height: 7rem; }
-  button { font-size: 1rem; padding: 0.6rem 1.2rem; cursor: pointer; }
-  .banner { padding: 1rem; font-size: 1.25rem; font-weight: bold; margin: 1rem 0; }
-  .banner.valid { background: #dcfce7; color: #166534; }
-  .banner.invalid { background: #fee2e2; color: #991b1b; }
-  .check { padding: 0.4rem 0; border-bottom: 1px solid #eee; }
-  .check .mark { font-weight: bold; }
-  .check.pass .mark { color: #166534; }
-  .check.fail .mark { color: #991b1b; }
-  .check .detail { color: #555; font-size: 0.9rem; }
-  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-  th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }
-  .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; word-break: break-all; }
-  .note { background: #f5f5f5; padding: 0.75rem 1rem; font-size: 0.9rem; }
-  .error { color: #991b1b; font-weight: bold; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1>VeilProof — Verify a report</h1>
-<p>Someone sent you a VeilProof report — a lender, a grant committee, a deal
-partner. Check it here in one click. No account, no wallet, nothing leaves
-your browser except two read-only view calls to the NEAR testnet RPC.</p>
-<p><button id="demoBtn" type="button">Try the live demo claim</button>
-<span id="demoStatus"></span></p>
-<p>The demo loads a real published claim from the demo wallet and verifies it
-against its onchain record — all seven checks should pass, including the
-AI summary. The report proves claims about a wallet's onchain history — for
-example "balance at least 5 NEAR" — without revealing which wallet to the
-public.</p>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">VeilProof<span class="tag">NEAR testnet</span></a>
+    <nav class="site-nav">
+      <a href="index.html">Prover</a>
+      <a href="verify.html" aria-current="page">Verifier portal</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+<section class="hero">
+  <p class="eyebrow">Verifier portal</p>
+  <h1>Verify a report</h1>
+  <p class="lede">Someone sent you a VeilProof report — a lender, a grant committee, a deal
+  partner. Check it here in one click. No account, no wallet, nothing leaves
+  your browser except two read-only view calls to the NEAR testnet RPC.</p>
+  <div class="cta-row">
+    <button id="demoBtn" type="button">Try the live demo claim</button>
+  </div>
+  <p id="demoStatus" class="muted"></p>
+  <p>The demo loads a real published claim from the demo wallet and verifies it
+  against its onchain record — all seven checks should pass, including the
+  AI summary. The report proves claims about a wallet's onchain history — for
+  example "balance at least 5 NEAR" — without revealing which wallet to the
+  public.</p>
+</section>
 
 <div class="note">
 <strong>What verification proves.</strong> The report hash, evidence hash
@@ -50,27 +47,32 @@ touched the chain. A report with no AI summary means "not analysed", not
 "verified by AI".
 </div>
 
-<h2>1. Report</h2>
-<label>Report ID (the onchain claim id)
-<input id="reportId" type="text" placeholder="e.g. a1b2c3d4e5f6a7b8" autocomplete="off">
-</label>
-<label>Report JSON (paste the public report)
-<textarea id="reportJson" placeholder='{"reportId": "...", "prover": "...", ...}'></textarea>
-</label>
+<section class="card">
+  <div class="step-head"><span class="step-num">1</span><h2>Report</h2></div>
+  <label>Report ID (the onchain claim id)
+  <input id="reportId" type="text" placeholder="e.g. a1b2c3d4e5f6a7b8" autocomplete="off">
+  </label>
+  <label>Report JSON (paste the public report)
+  <textarea id="reportJson" placeholder='{"reportId": "...", "prover": "...", ...}'></textarea>
+  </label>
+</section>
 
-<h2>2. Disclosure package (private)</h2>
-<p><strong>Only paste this here, in your own browser.</strong> It contains
-the wallet address. This page sends it nowhere: verification runs locally,
-and the only network calls are two read-only view calls
-(<span class="mono">get_claim</span> and
-<span class="mono">is_claim_valid</span>) to the NEAR testnet RPC.</p>
-<label>Disclosure package JSON
-<textarea id="disclosureJson" placeholder='{"reportId": "...", "address": "...", "snapshot": {...}, "dataHash": "..."}'></textarea>
-</label>
+<section class="card">
+  <div class="step-head"><span class="step-num">2</span><h2>Disclosure package (private)</h2></div>
+  <p><strong>Only paste this here, in your own browser.</strong> It contains
+  the wallet address. This page sends it nowhere: verification runs locally,
+  and the only network calls are two read-only view calls
+  (<span class="mono">get_claim</span> and
+  <span class="mono">is_claim_valid</span>) to the NEAR testnet RPC.</p>
+  <label>Disclosure package JSON
+  <textarea id="disclosureJson" placeholder='{"reportId": "...", "address": "...", "snapshot": {...}, "dataHash": "..."}'></textarea>
+  </label>
+</section>
 
-<h2>3. Policy</h2>
-<label>Policy JSON (the rules the claims were evaluated under)
-<textarea id="policyJson">{
+<section class="card">
+  <div class="step-head"><span class="step-num">3</span><h2>Policy</h2></div>
+  <label>Policy JSON (the rules the claims were evaluated under)
+  <textarea id="policyJson">{
   "balanceAtLeastYocto": "1000000000000000000000000",
   "stakedAtLeastYocto": "1000000000000000000000000",
   "minTxCount": 1,
@@ -79,19 +81,35 @@ and the only network calls are two read-only view calls
   "volumeWindowDays": 30,
   "noFailedWindowDays": 30
 }</textarea>
-</label>
+  </label>
+  <p><button id="verifyBtn" type="button">Verify report</button></p>
+  <p id="status"></p>
+</section>
 
-<p><button id="verifyBtn" type="button">Verify report</button></p>
-<p id="status"></p>
 <div id="certificate" hidden>
   <div id="banner" class="banner"></div>
-  <h2>Checks</h2>
-  <div id="checks"></div>
-  <h2>Claims in this report</h2>
-  <div id="claims"></div>
-  <h2>Report facts</h2>
-  <div id="facts"></div>
+  <section class="card">
+    <h2>Checks</h2>
+    <div id="checks"></div>
+  </section>
+  <section class="card">
+    <h2>Claims in this report</h2>
+    <div id="claims"></div>
+  </section>
+  <section class="card">
+    <h2>Report facts</h2>
+    <div id="facts"></div>
+  </section>
 </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>VeilProof — NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
+    <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
+  </div>
+</footer>
+
 
 <script>
 (function () {
