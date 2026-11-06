@@ -191,3 +191,59 @@ test('a failing completion endpoint surfaces as api_error, not a 500', async () 
     });
   });
 });
+
+const SCORE = {
+  version: 'score-v1',
+  value: 850,
+  band: 'strong',
+  components: [{ id: 'sustained_balance', points: 300, max: 300, measured: true }],
+};
+const UNDERWRITE_CONTENT = JSON.stringify({
+  verdict: 'lend_with_limits',
+  suggestedLimitNear: 2,
+  confidence: 'medium',
+  points: ['Solid score, but activity is thin.'],
+});
+
+function underwriteStub() {
+  return async (url) => {
+    if (String(url).includes('/attestation/report')) {
+      const nonce = new URL(url).searchParams.get('nonce');
+      return { ok: true, status: 200, json: async () => ({ gateway_attestation: { request_nonce: nonce } }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: UNDERWRITE_CONTENT } }] }),
+    };
+  };
+}
+
+test('underwriting mode returns an advisory verdict with role underwriting', async () => {
+  const res = await withKey('test-key', () =>
+    withFetch(underwriteStub(), () =>
+      callRoute('POST', { mode: 'underwriting', claims: CLAIMS, metrics: METRICS, score: SCORE, policyVersion: 'veilproof-policy-v2' }),
+    ),
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.equal(res.body.summary.role, 'underwriting');
+  assert.equal(res.body.summary.verdict, 'lend_with_limits');
+  assert.equal(res.body.summary.suggestedLimitNear, 2);
+});
+
+test('underwriting without a score is a 400 (malformed input), not a server error', async () => {
+  const res = await withKey('test-key', () =>
+    withFetch(underwriteStub(), () =>
+      callRoute('POST', { mode: 'underwriting', claims: CLAIMS, metrics: METRICS, policyVersion: 'veilproof-policy-v2' }),
+    ),
+  );
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error, 'invalid_input');
+});
+
+test('unknown mode is a 400', async () => {
+  const res = await callRoute('POST', { mode: 'audit', claims: CLAIMS, metrics: METRICS, policyVersion: 'veilproof-policy-v2' });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error, 'invalid_input');
+});

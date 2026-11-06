@@ -18,7 +18,8 @@
 
 import { sha256Hex } from './crypto.js';
 import { evaluateClaims } from './claims-engine.js';
-import { computeDataHash } from './onchain.js';
+import { dataHashForSnapshots } from './onchain.js';
+import { computeScore } from './score.js';
 import { reportHash, evidenceHash, policyHash } from './report.js';
 
 function isObject(value) {
@@ -47,6 +48,14 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
   const checks = [];
   const check = (name, passed, detail) => checks.push({ check: name, passed, detail });
 
+  // All disclosed snapshots: the primary one plus any linked wallets'.
+  const snapshots = [disclosurePackage.snapshot];
+  const linked = Array.isArray(disclosurePackage.linked) ? disclosurePackage.linked : [];
+  for (const entry of linked) {
+    if (entry && typeof entry === 'object' && entry.snapshot) snapshots.push(entry.snapshot);
+  }
+  const bundle = { wallets: snapshots };
+
   // 0. The disclosure package belongs to this report.
   if (typeof disclosurePackage.address !== 'string' || disclosurePackage.address.length === 0) {
     check('prover_binding', false, 'Disclosure package has no address.');
@@ -54,6 +63,18 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
     check('prover_binding', false, 'Report has no prover commitment.');
   } else if ((await sha256Hex(disclosurePackage.address)) !== report.prover) {
     check('prover_binding', false, 'Disclosure address does not hash to the report prover commitment.');
+  } else if (linked.length > 0) {
+    const linkedProvers = Array.isArray(report.linkedProvers) ? report.linkedProvers : [];
+    const hashes = [];
+    for (const entry of linked) {
+      hashes.push(typeof entry?.address === 'string' && entry.address.length > 0 ? await sha256Hex(entry.address) : null);
+    }
+    const bad = hashes.findIndex((h, i) => h === null || h !== linkedProvers[i]);
+    if (bad >= 0) {
+      check('prover_binding', false, `Linked wallet ${bad} does not hash to the report linked-prover commitment.`);
+    } else {
+      check('prover_binding', true, 'Disclosure addresses hash to the report prover commitments.');
+    }
   } else {
     check('prover_binding', true, 'Disclosure address hashes to the report prover commitment.');
   }
@@ -94,10 +115,9 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
     check('policy_hash', false, `Could not compute policy hash: ${err.message}`);
   }
 
-  // d. The disclosed snapshot reproduces the committed data hash.
+  // d. The disclosed snapshot(s) reproduce the committed data hash.
   try {
-    const snap = disclosurePackage.snapshot;
-    const computed = await computeDataHash(snap.account.accountId, snap.account.amount, snap.account.locked, snap.txs);
+    const computed = await dataHashForSnapshots(snapshots);
     const ref = report.evidenceRefs?.dataHash;
     if (computed === ref) {
       check('data_hash', true, 'Recomputed data hash matches the report evidence reference.');
@@ -113,7 +133,7 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
     if (!Array.isArray(report.claims)) {
       check('claims', false, 'Report claims are not an array.');
     } else {
-      const rerun = evaluateClaims(disclosurePackage.snapshot, policy, nowNs);
+      const rerun = evaluateClaims(bundle, policy, nowNs);
       const byId = new Map(rerun.claims.map((c) => [c.id, c]));
       let failure = null;
       if (Array.isArray(report.disclosed)) {
@@ -150,7 +170,51 @@ export async function verifyReport({ report, onchainRecord, disclosurePackage, p
     check('claims', false, `Claim re-run failed: ${err.message}`);
   }
 
-  // f. Unexpired and still valid onchain.
+  // f. The deterministic score, when present, recomputes exactly.
+  try {
+    if (report.score === null || report.score === undefined) {
+      check('score', true, 'Report carries no score (not scored).');
+    } else {
+      const windows = {
+        txWindowDays: policy.txWindowDays,
+        volumeWindowDays: policy.volumeWindowDays,
+        noFailedWindowDays: policy.noFailedWindowDays,
+      };
+      const again = computeScore(bundle, windows, nowNs);
+      const same =
+        again.version === report.score.version &&
+        again.value === report.score.value &&
+        again.band === report.score.band &&
+        JSON.stringify(again.components) === JSON.stringify(report.score.components);
+      if (same) {
+        check('score', true, `Score recomputed exactly: ${again.value} (${again.band}).`);
+      } else {
+        check('score', false, `Score differs on re-run (report: ${report.score.value}, re-run: ${again.value}).`);
+      }
+    }
+  } catch (err) {
+    check('score', false, `Score re-run failed: ${err.message}`);
+  }
+
+  // g. Every linked wallet proves ownership with a linking transfer.
+  {
+    if (linked.length === 0) {
+      check('link_proofs', true, 'No linked wallets to prove.');
+    } else {
+      const allTxs = snapshots.flatMap((s) => s.txs || []);
+      const missing = linked.findIndex((entry) => {
+        const tx = allTxs.find((t) => t.hash === entry.linkTxHash);
+        return !tx || tx.senderId !== entry.address || tx.receiverId !== disclosurePackage.address || tx.status !== 'Success';
+      });
+      if (missing >= 0) {
+        check('link_proofs', false, `Linked wallet ${missing} has no successful linking transfer to the primary address.`);
+      } else {
+        check('link_proofs', true, `All ${linked.length} linked wallet(s) proved ownership by a transfer to the primary address.`);
+      }
+    }
+  }
+
+  // h. Unexpired and still valid onchain.
   {
     const reasons = [];
     try {

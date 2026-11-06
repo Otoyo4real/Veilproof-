@@ -29,14 +29,15 @@
 // sign by redirecting away and back) does not lose the built report.
 
 import { evaluateClaims } from './js/claims-engine.js';
+import { computeScore } from './js/score.js';
 import { buildReport, reportHash, evidenceHash, policyHash } from './js/report.js';
-import { buildDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
-import { fetchAccountSnapshot } from './js/onchain.js';
+import { buildDisclosurePackage, buildMultiDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
+import { fetchAccountSnapshot, dataHashForSnapshots } from './js/onchain.js';
 import { sha256Hex, randomHex } from './js/crypto.js';
 
 const NETWORK = 'testnet';
 const REGISTRY = 'registry.veilproof.testnet';
-const POLICY_VERSION = 'veilproof-policy-v1';
+const POLICY_VERSION = 'veilproof-policy-v2';
 const RPC_URL = 'https://rpc.testnet.near.org';
 const EXPLORER_TX = 'https://testnet.nearblocks.io/txns/';
 
@@ -91,8 +92,10 @@ const state = {
   previewAddress: null,
   challenge: null,
   snapshot: null,
+  linkedWallets: [],
   policy: null,
   evaluation: null,
+  score: null,
   aiSummary: null,
   attestationRef: null,
   report: null,
@@ -109,8 +112,10 @@ function saveState() {
         previewAddress: state.previewAddress,
         challenge: state.challenge,
         snapshot: state.snapshot,
+        linkedWallets: state.linkedWallets,
         policy: state.policy,
         evaluation: state.evaluation,
+        score: state.score,
         aiSummary: state.aiSummary,
         attestationRef: state.attestationRef,
         report: state.report,
@@ -378,21 +383,71 @@ async function loadDemoHistory() {
   }
 }
 
+function parseLinkedAddresses() {
+  const raw = $('linkedAddresses').value.split('\n').map((l) => l.trim().toLowerCase()).filter(Boolean);
+  for (const addr of raw) {
+    const named = /^[a-z0-9._-]{2,64}$/.test(addr) && (addr.endsWith('.near') || addr.endsWith('.testnet'));
+    const implicit = /^[0-9a-f]{64}$/.test(addr);
+    if (!named && !implicit) throw new Error(`Linked address does not look like a NEAR address: ${addr}`);
+    if (addr === state.previewAddress) throw new Error(`Linked address ${addr} is the primary address — list it only once.`);
+  }
+  if (new Set(raw).size !== raw.length) throw new Error('Linked addresses contain a duplicate.');
+  return raw;
+}
+
+function parseLinkTxHashes(count) {
+  const raw = $('linkedTxHashes').value.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (raw.length !== count) {
+    throw new Error(`Expected ${count} link transfer hash(es), one per linked wallet, got ${raw.length}.`);
+  }
+  return raw;
+}
+
 async function fetchSnapshot() {
   const out = $('snapshotOut');
   try {
     const address = readPreviewAddress();
     const entries = parseTxLines();
+    const linkedAddresses = parseLinkedAddresses();
+    const linkHashes = parseLinkTxHashes(linkedAddresses.length);
+    const sampleHours = Number($('sampleWindow').value);
+    const sampleOpts = sampleHours > 0 ? { balanceSamples: { windowHours: sampleHours, samples: 4 } } : {};
     out.innerHTML = '<p class="muted">Fetching account state for <span class="mono">' + esc(address) + '</span> and verifying ' + entries.length + ' transaction(s)…</p>';
-    const snapshot = await fetchAccountSnapshot(address, entries);
+    const snapshot = await fetchAccountSnapshot(address, entries, sampleOpts);
     state.snapshot = snapshot;
+    state.linkedWallets = [];
+    // Linked wallets: their txs are the link transfer plus any tx
+    // lines in the box whose sender is that wallet. The link transfer
+    // must verify as a successful transfer to the primary address —
+    // that is the ownership proof for the linked wallet.
+    for (let i = 0; i < linkedAddresses.length; i += 1) {
+      const linkedAddress = linkedAddresses[i];
+      const linkTxHash = linkHashes[i];
+      const walletEntries = entries.filter((e) => e.senderId === linkedAddress);
+      if (!walletEntries.some((e) => e.hash === linkTxHash)) {
+        walletEntries.push({ hash: linkTxHash, senderId: linkedAddress });
+      }
+      const linkedSnapshot = await fetchAccountSnapshot(linkedAddress, walletEntries, sampleOpts);
+      const linkTx = linkedSnapshot.txs.find((t) => t.hash === linkTxHash);
+      if (!linkTx || linkTx.senderId !== linkedAddress || linkTx.receiverId !== address || linkTx.status !== 'Success') {
+        throw new Error(`Link transfer for ${linkedAddress} did not verify as a successful transfer to ${address}.`);
+      }
+      state.linkedWallets.push({ address: linkedAddress, snapshot: linkedSnapshot, linkTxHash });
+    }
     invalidateReport('a new snapshot was fetched.');
+    const linkedLine = state.linkedWallets.length > 0
+      ? '<p>Linked wallets: ' + state.linkedWallets.map((w) => '<span class="mono">' + esc(w.address) + '</span>').join(', ') + ' (ownership proved by a transfer to the primary address).</p>'
+      : '';
+    const sampleLine = snapshot.balanceSamples
+      ? '<p>Balance samples: ' + snapshot.balanceSamples.length + ' readings over ' + sampleHours + 'h (lowest ' + esc(yoctoToNear(snapshot.balanceSamples.reduce((m, s) => (BigInt(s.amount) < BigInt(m) ? s.amount : m), snapshot.balanceSamples[0].amount))) + ' NEAR).</p>'
+      : '';
     out.innerHTML =
       '<p class="ok">Snapshot fetched for <span class="mono">' + esc(address) + '</span> at block ' + snapshot.blockHeight + '.</p>' +
       '<p>Balance: <span class="mono">' + esc(yoctoToNear(snapshot.account.amount)) + ' NEAR</span> ' +
       '(staked: <span class="mono">' + esc(yoctoToNear(snapshot.account.locked)) + ' NEAR</span>)</p>' +
       '<p>Verified transactions: ' + snapshot.txs.length + ' of ' + entries.length + ' supplied ' +
       '(unverifiable hashes are skipped).</p>' +
+      linkedLine + sampleLine +
       '<p>Data hash: <span class="mono">' + esc(snapshot.dataHash) + '</span></p>';
     updateWalletUI();
     saveState();
@@ -433,6 +488,31 @@ function readPolicy() {
     if (!/^\d+$/.test(noFailed)) throw new Error('No-failed window must be a whole number of days.');
     policy.noFailedWindowDays = Number(noFailed);
   }
+  const aggBalance = $('polAggBalance').value.trim();
+  if (aggBalance) policy.aggregateBalanceAtLeastYocto = nearToYocto(aggBalance);
+  const aggMinTx = $('polAggMinTx').value.trim();
+  const aggTxWindow = $('polAggTxWindow').value.trim();
+  if (aggMinTx) {
+    if (!/^\d+$/.test(aggMinTx)) throw new Error('Aggregate minimum tx count must be a whole number.');
+    if (!aggTxWindow) throw new Error('An aggregate minimum tx count needs its window (days).');
+    policy.aggregateMinTxCount = aggMinTx;
+    policy.aggregateTxWindowDays = Number(aggTxWindow);
+  } else if (aggTxWindow) {
+    policy.aggregateTxWindowDays = Number(aggTxWindow);
+  }
+  const aggMinVol = $('polAggMinVol').value.trim();
+  const aggVolWindow = $('polAggVolWindow').value.trim();
+  if (aggMinVol) {
+    if (!aggVolWindow) throw new Error('An aggregate minimum volume needs its window (days).');
+    policy.aggregateMinVolumeYocto = nearToYocto(aggMinVol);
+    policy.aggregateVolumeWindowDays = Number(aggVolWindow);
+  } else if (aggVolWindow) {
+    policy.aggregateVolumeWindowDays = Number(aggVolWindow);
+  }
+  const sustained = $('polSustained').value.trim();
+  if (sustained) policy.sustainedBalanceAtLeastYocto = nearToYocto(sustained);
+  const timeWeighted = $('polTimeWeighted').value.trim();
+  if (timeWeighted) policy.timeWeightedBalanceAtLeastYocto = nearToYocto(timeWeighted);
   for (const [key, value] of Object.entries(policy)) {
     if (typeof value === 'number' && (!Number.isInteger(value) || value < 0)) {
       throw new Error(`Policy field ${key} must be a non-negative whole number of days.`);
@@ -465,6 +545,17 @@ function renderClaims() {
           esc(c.id) + ' — ' + (c.passed ? 'passed' : 'did not pass') + '</label>',
       )
       .join('');
+  const score = state.score;
+  $('scoreOut').innerHTML = score
+    ? '<h3>Portable credit score (score-v1)</h3>' +
+      '<p><strong>' + score.value + ' / 1000 — ' + esc(score.band) + '</strong></p>' +
+      '<p class="muted">Deterministic and recomputable: any app holding the disclosure package can re-run the same published rules and get this exact number. That is what makes it reusable across apps.</p>' +
+      '<table><tr><th>Component</th><th>Points</th><th>Measured</th></tr>' +
+      score.components
+        .map((c) => '<tr><td>' + esc(c.label) + '</td><td>' + c.points + ' / ' + c.max + '</td><td>' + (c.measured ? 'yes' : 'not measured') + '</td></tr>')
+        .join('') +
+      '</table>'
+    : '';
   updateWalletUI();
 }
 
@@ -475,44 +566,63 @@ function evaluate() {
     if (Object.keys(policy).length === 0) throw new Error('Set at least one policy field.');
     const nowNs = (BigInt(Date.now()) * 1000000n).toString();
     state.policy = policy;
-    state.evaluation = evaluateClaims(state.snapshot, policy, nowNs);
+    const bundle = { wallets: [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)] };
+    state.evaluation = evaluateClaims(bundle, policy, nowNs);
+    // The score is computed from the same snapshots and the policy's
+    // windows, so any verifier re-running it gets the same number.
+    state.score = computeScore(bundle, {
+      txWindowDays: policy.txWindowDays,
+      volumeWindowDays: policy.volumeWindowDays,
+      noFailedWindowDays: policy.noFailedWindowDays,
+    }, nowNs);
     // A new evaluation supersedes any AI summary: the summary was about
     // the old claims. The prover can re-run the analysis.
     state.aiSummary = null;
     state.attestationRef = null;
-    $('aiStatus').textContent = 'AI analysis not run yet for these claims. The report will say "not analysed" unless you run it.';
+    $('aiStatus').textContent = 'AI underwriting not run yet for these claims. The report will say "not analysed" unless you run it.';
     invalidateReport('the claims were re-evaluated.');
     renderClaims();
     saveState();
   } catch (err) {
     $('claimsOut').innerHTML = '<p class="error">Evaluation failed: ' + esc(err.message) + '</p>';
+    $('scoreOut').innerHTML = '';
   }
 }
 
 // --- AI analysis (demo steps 5-6) ---
 
 function buildMetrics() {
-  const snap = state.snapshot;
+  const snapshots = [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)];
   const policy = state.policy;
+  const ids = new Set(snapshots.map((s) => s.account.accountId));
+  let balance = 0n;
+  let staked = 0n;
   let success = 0;
   let failed = 0;
   let volume = 0n;
-  for (const tx of snap.txs) {
-    if (tx.status === 'Success') {
-      success += 1;
-      if (tx.senderId === snap.account.accountId || tx.receiverId === snap.account.accountId) {
-        volume += BigInt(tx.amountYocto);
+  const seen = new Set();
+  for (const snap of snapshots) {
+    balance += BigInt(snap.account.amount);
+    staked += BigInt(snap.account.locked);
+    for (const tx of snap.txs) {
+      if (seen.has(tx.hash)) continue;
+      seen.add(tx.hash);
+      if (tx.status === 'Success') {
+        success += 1;
+        if (ids.has(tx.senderId) || ids.has(tx.receiverId)) {
+          volume += BigInt(tx.amountYocto);
+        }
+      } else if (tx.status === 'Failure') {
+        failed += 1;
       }
-    } else if (tx.status === 'Failure') {
-      failed += 1;
     }
   }
   // Allowlist by construction: only aggregate values, never the address,
   // never tx hashes, never the snapshot.
   return {
-    balanceYocto: snap.account.amount,
-    stakedYocto: snap.account.locked,
-    txCount: snap.txs.length,
+    balanceYocto: balance.toString(),
+    stakedYocto: staked.toString(),
+    txCount: seen.size,
     successTxCount: success,
     failedTxCount: failed,
     volumeYocto: volume.toString(),
@@ -527,37 +637,43 @@ async function runAiAnalysis() {
   const status = $('aiStatus');
   try {
     if (!state.evaluation) throw new Error('Evaluate the claims first.');
-    status.textContent = 'Asking NEAR AI Cloud…';
+    status.textContent = 'Asking NEAR AI Cloud for an underwriting judgment…';
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        mode: 'underwriting',
         claims: state.evaluation.claims,
         metrics: buildMetrics(),
+        score: state.score,
         policyVersion: POLICY_VERSION,
       }),
     });
     const body = await res.json();
     if (!res.ok) {
-      status.textContent = 'AI analysis failed: ' + (body.error || `HTTP ${res.status}`) + '. The report will say "not analysed".';
+      status.textContent = 'AI underwriting failed: ' + (body.error || `HTTP ${res.status}`) + '. The report will say "not analysed".';
       return;
     }
     if (body.status === 'not_configured') {
       status.textContent =
-        'AI analysis not available yet — the separate VeilProof NEAR AI key is not set on the server. ' +
+        'AI underwriting not available yet — the separate VeilProof NEAR AI key is not set on the server. ' +
         'The report will say "not analysed", which is honest, not a failure.';
       state.aiSummary = null;
       state.attestationRef = null;
     } else if (body.status === 'ok' && body.summary) {
       state.aiSummary = body.summary;
       state.attestationRef = body.summary.attestation?.ref ?? null;
+      const limit = body.summary.suggestedLimitNear === null || body.summary.suggestedLimitNear === undefined
+        ? 'no amount suggested'
+        : 'suggested limit ' + esc(String(body.summary.suggestedLimitNear)) + ' NEAR';
       status.innerHTML =
-        '<span class="ok">AI analysis complete.</span> Verdict: <strong>' + esc(body.summary.verdict) + '</strong>. ' +
+        '<span class="ok">Underwriting judgment complete (advisory, not a guarantee).</span> Verdict: <strong>' +
+        esc(body.summary.verdict) + '</strong> (' + limit + ', confidence ' + esc(body.summary.confidence) + '). ' +
         'Attestation: ' + (body.summary.attestation?.verifiable ? 'verified (nonce matched)' : 'unattested') + '.';
-      invalidateReport('the AI analysis was added.');
+      invalidateReport('the AI underwriting was added.');
     } else {
       status.textContent =
-        'AI analysis returned status "' + body.status + '"' +
+        'AI underwriting returned status "' + body.status + '"' +
         (body.error ? ` (${body.error})` : '') +
         '. The report will say "not analysed".';
       state.aiSummary = null;
@@ -565,7 +681,7 @@ async function runAiAnalysis() {
     }
     saveState();
   } catch (err) {
-    status.textContent = 'AI analysis failed: ' + err.message + '. The report will say "not analysed".';
+    status.textContent = 'AI underwriting failed: ' + err.message + '. The report will say "not analysed".';
   }
 }
 
@@ -606,23 +722,32 @@ async function buildReportAndHashes() {
     const days = Number($('expirySelect').value);
     const expiresAt = computeExpiresAt(days);
     const proverAddressHash = await sha256Hex(state.previewAddress);
+    const linkedProverHashes = [];
+    for (const w of state.linkedWallets) linkedProverHashes.push(await sha256Hex(w.address));
+    // The evidence data hash covers every wallet in the bundle (and
+    // any balance samples); the single-wallet hash is only used when
+    // there is one wallet and no samples.
+    const dataHash = await dataHashForSnapshots([state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)]);
     const report = buildReport({
       proverAddressHash,
       claims: state.evaluation.claims,
       policyVersion: POLICY_VERSION,
       aiSummary: state.aiSummary,
-      evidenceRefs: { dataHash: state.snapshot.dataHash, attestationRef: state.attestationRef },
+      evidenceRefs: { dataHash, attestationRef: state.attestationRef },
       expiresAt,
       disclosedFields: disclosed,
+      linkedProverHashes,
+      score: state.score,
     });
-    // Tripwire: the public report must not contain the raw address or
+    // Tripwire: the public report must not contain any raw address or
     // any transaction hash. If it ever did, refuse to show or publish it.
-    assertPublicReportClean(
-      report,
-      state.previewAddress,
-      state.snapshot.txs.map((t) => t.hash),
-    );
-    const disclosurePackage = await buildDisclosurePackage(report, state.previewAddress, state.snapshot);
+    const allAddresses = [state.previewAddress, ...state.linkedWallets.map((w) => w.address)];
+    const allTxHashes = [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)].flatMap((s) => s.txs.map((t) => t.hash));
+    for (const addr of allAddresses) assertPublicReportClean(report, addr, allTxHashes);
+    const disclosurePackage =
+      state.linkedWallets.length > 0
+        ? await buildMultiDisclosurePackage(report, state.previewAddress, state.snapshot, state.linkedWallets)
+        : await buildDisclosurePackage(report, state.previewAddress, state.snapshot);
     const hashes = {
       report_hash: await reportHash(report),
       evidence_hash: await evidenceHash(report.evidenceRefs),
@@ -636,7 +761,11 @@ async function buildReportAndHashes() {
       '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
       '<p>Prover commitment (SHA-256 of the address — the address itself is never shown):<br><span class="mono">' +
       esc(report.prover) + '</span></p>' +
-      '<p>AI summary: ' + (report.aiSummary === null ? 'Not analysed.' : esc(report.aiSummary.verdict) + ' (NEAR AI Cloud).') + '</p>' +
+      (report.linkedProvers.length > 0 ? '<p>Linked wallets: ' + report.linkedProvers.length + ' (commitments only).</p>' : '') +
+      (report.score
+        ? '<p>Credit score: <strong>' + report.score.value + ' / 1000 (' + esc(report.score.band) + ')</strong> — recomputable by any app from the disclosure package.</p>'
+        : '<p>Credit score: not scored.</p>') +
+      '<p>AI summary: ' + (report.aiSummary === null ? 'Not analysed.' : esc(report.aiSummary.verdict ?? report.aiSummary.role ?? 'analysed') + ' (NEAR AI Cloud, advisory).') + '</p>' +
       '<p>Report hash: <span class="mono">' + esc(hashes.report_hash) + '</span></p>' +
       '<p>Evidence hash: <span class="mono">' + esc(hashes.evidence_hash) + '</span></p>' +
       '<p>Policy hash: <span class="mono">' + esc(hashes.policy_hash) + '</span></p>' +

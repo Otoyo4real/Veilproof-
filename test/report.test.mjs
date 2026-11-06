@@ -111,6 +111,8 @@ test('buildReport: shape, ids, and defaults', () => {
   assert.equal(report.aiSummary, null);
   assert.equal(report.evidenceRefs.attestationRef, null);
   assert.equal(report.expiresAt, EXPIRES_AT);
+  assert.equal(report.score, null);
+  assert.deepEqual(report.linkedProvers, []);
   assert.deepEqual(report.disclosed, [
     'balance_at_least',
     'staked_at_least',
@@ -125,9 +127,11 @@ test('buildReport: shape, ids, and defaults', () => {
     'disclosed',
     'evidenceRefs',
     'expiresAt',
+    'linkedProvers',
     'policyVersion',
     'prover',
     'reportId',
+    'score',
   ]);
   // Two reports are never the same id.
   const { report: second } = genuineReport();

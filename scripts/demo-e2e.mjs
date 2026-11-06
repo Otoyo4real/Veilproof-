@@ -119,18 +119,18 @@ async function main() {
   const history = JSON.parse(fs.readFileSync(new URL('../demo/history.json', import.meta.url), 'utf8'));
   if (history.accountId !== DEMO_ACCOUNT) fail('demo/history.json is not for the demo wallet');
 
-  // --- Step 1: live snapshot, verify the 4 demo txs.
+  // --- Step 1: live snapshot, verify the 5 demo txs.
   step('Fetch live snapshot for veilproof-demo.testnet (demo steps 3-4)');
   const entries = history.transfers.map((t) => ({ hash: t.hash, senderId: t.senderId }));
   const snapshot = await fetchAccountSnapshot(DEMO_ACCOUNT, entries);
-  check(snapshot.txs.length === 4, `expected 4 verified txs, got ${snapshot.txs.length}`);
+  check(snapshot.txs.length === 5, `expected 5 verified txs, got ${snapshot.txs.length}`);
   check(snapshot.txs.every((t) => t.status === 'Success'), 'not all demo txs are Success');
   for (const t of snapshot.txs) {
     info(`tx ${t.hash.slice(0, 12)}… ${t.senderId} -> ${t.receiverId} ${fmtNear(t.amountYocto)} NEAR ${t.status} (block ${t.blockHeight})`);
   }
   info(`balance ${fmtNear(snapshot.account.amount)} NEAR | locked ${fmtNear(snapshot.account.locked)} NEAR | block ${snapshot.blockHeight}`);
   info(`dataHash ${snapshot.dataHash}`);
-  ok('4/4 demo txs verified from the chain');
+  ok('5/5 demo txs verified from the chain');
 
   // --- Step 2: evaluate claims.
   step('Evaluate claims under the demo policy (demo step 4)');

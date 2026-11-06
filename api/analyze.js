@@ -1,11 +1,14 @@
 // POST /api/analyze — NEAR AI analysis for a VeilProof report.
 //
 // The browser sends ONLY claim-level data: { claims, metrics,
-// policyVersion }. The address, the snapshot and transaction hashes
-// never leave the prover's browser for this call — the route rejects
-// any request carrying them (defence in depth; src/ai-analysis.js
-// also sanitises by allowlist, so a leaking client cannot smuggle
-// them through either).
+// policyVersion } for a consistency check, or { claims, metrics,
+// score, policyVersion, mode: 'underwriting' } for the advisory
+// underwriting judgment. The address, the snapshot and transaction
+// hashes never leave the prover's browser for this call — the route
+// rejects any request carrying them (defence in depth;
+// src/ai-analysis.js also sanitises by allowlist, so a leaking client
+// cannot smuggle them through either). The score is aggregate data
+// (a number, a band, per-component points), so it is allowed.
 //
 // The key comes from env VEILPROOF_NEAR_AI_API_KEY ONLY, read at call
 // time inside src/ai-analysis.js. Without it the route answers
@@ -23,7 +26,7 @@
 // route test (test/analyze-route.test.mjs) imports this file and
 // exercises the real import path.
 
-import { analyseClaims } from '../src/ai-analysis.js';
+import { analyseClaims, analyseUnderwriting } from '../src/ai-analysis.js';
 
 // Top-level keys that must never arrive here. A client sending them is
 // leaking private data; refuse instead of silently dropping it, so a
@@ -69,11 +72,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { status, summary, error } = await analyseClaims({
-      claims: body.claims,
-      metrics: body.metrics,
-      policyVersion: body.policyVersion,
-    });
+    const mode = body.mode === undefined ? 'consistency' : body.mode;
+    if (mode !== 'consistency' && mode !== 'underwriting') {
+      return res.status(400).json({ error: 'invalid_input', detail: "mode must be 'consistency' or 'underwriting'" });
+    }
+    const result =
+      mode === 'underwriting'
+        ? await analyseUnderwriting({
+            claims: body.claims,
+            metrics: body.metrics,
+            score: body.score,
+            policyVersion: body.policyVersion,
+          })
+        : await analyseClaims({
+            claims: body.claims,
+            metrics: body.metrics,
+            policyVersion: body.policyVersion,
+          });
+    const { status, summary, error } = result;
     // Never echo the request back, and never include anything the
     // module did not return: the response carries only the status and
     // the structured summary (or null).

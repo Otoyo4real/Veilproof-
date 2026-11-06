@@ -201,6 +201,49 @@ touched the chain. A report with no AI summary means "not analysed", not
     return sha256Hex(canonicalJson(payload));
   }
 
+  // Mirror of computeMultiDataHash / dataHashForSnapshots in
+  // src/onchain.js: the multi-wallet path, used whenever the evidence
+  // spans more than one wallet or any wallet carries balanceSamples.
+  async function computeMultiDataHash(wallets) {
+    if (!Array.isArray(wallets) || wallets.length === 0) throw new Error('computeMultiDataHash: wallets must be a non-empty array');
+    var entries = wallets.map(function (w) {
+      var account = w.account || w;
+      var txs = w.txs || [];
+      var samples = Array.isArray(w.balanceSamples) ? w.balanceSamples : [];
+      return {
+        accountId: account.accountId,
+        amount: String(account.amount),
+        locked: String(account.locked),
+        txs: txs.slice().sort(function (a, b) { return a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0; }).map(function (t) {
+          return {
+            amountYocto: String(t.amountYocto),
+            blockHeight: t.blockHeight,
+            blockTimestampNs: String(t.blockTimestampNs),
+            hash: t.hash,
+            receiverId: t.receiverId,
+            senderId: t.senderId,
+            status: t.status,
+          };
+        }),
+        balanceSamples: samples.slice().sort(function (a, b) { return a.blockHeight - b.blockHeight; }).map(function (s) {
+          return { amount: String(s.amount), blockHeight: s.blockHeight };
+        }),
+      };
+    });
+    entries.sort(function (a, b) { return a.accountId < b.accountId ? -1 : a.accountId > b.accountId ? 1 : 0; });
+    return sha256Hex(canonicalJson({ wallets: entries }));
+  }
+
+  async function dataHashForSnapshots(snapshots) {
+    if (!Array.isArray(snapshots) || snapshots.length === 0) throw new Error('dataHashForSnapshots: snapshots must be a non-empty array');
+    var needsMulti = snapshots.length > 1 || snapshots.some(function (s) { return Array.isArray(s.balanceSamples) && s.balanceSamples.length > 0; });
+    if (!needsMulti) {
+      var s = snapshots[0];
+      return computeDataHash(s.account.accountId, s.account.amount, s.account.locked, s.txs);
+    }
+    return computeMultiDataHash(snapshots);
+  }
+
   // --- Claims engine: mirror of src/claims-engine.js ---
   var NS_PER_DAY = 86400n * 1000000000n;
 
@@ -231,12 +274,75 @@ touched the chain. A report with no AI summary means "not analysed", not
       toBigInt(snapshot.txs[i].amountYocto, 'tx.amountYocto');
       toBigInt(snapshot.txs[i].blockTimestampNs, 'tx.blockTimestampNs');
     }
+    if (snapshot.balanceSamples !== undefined) {
+      if (!Array.isArray(snapshot.balanceSamples)) {
+        throw new Error('claims-engine: snapshot.balanceSamples must be an array when present');
+      }
+      for (var j = 0; j < snapshot.balanceSamples.length; j++) {
+        var s = snapshot.balanceSamples[j];
+        if (!s || typeof s !== 'object') throw new Error('claims-engine: balanceSamples entries must be objects');
+        toBigInt(s.amount, 'balanceSample.amount');
+        if (!Number.isInteger(s.blockHeight) || s.blockHeight < 0) {
+          throw new Error('claims-engine: balanceSample.blockHeight must be a non-negative integer');
+        }
+      }
+    }
   }
 
-  function txsInWindow(snapshot, days, nowNs) {
+  function normalizeBundle(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('claims-engine: snapshot or bundle must be an object');
+    }
+    var wallets = Array.isArray(input.wallets) ? input.wallets : [input];
+    if (wallets.length === 0) throw new Error('claims-engine: bundle must contain at least one wallet snapshot');
+    wallets.forEach(requireSnapshot);
+    return wallets;
+  }
+
+  function unionTxs(wallets) {
+    var byHash = {};
+    var out = [];
+    wallets.forEach(function (w) {
+      w.txs.forEach(function (tx) {
+        if (!byHash[tx.hash]) { byHash[tx.hash] = true; out.push(tx); }
+      });
+    });
+    return out.sort(function (a, b) { return a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0; });
+  }
+
+  function aggregateBalance(wallets) {
+    return wallets.reduce(function (sum, w) { return sum + toBigInt(w.account.amount, 'snapshot.account.amount'); }, 0n);
+  }
+
+  function aggregateStaked(wallets) {
+    return wallets.reduce(function (sum, w) { return sum + toBigInt(w.account.locked, 'snapshot.account.locked'); }, 0n);
+  }
+
+  function sampleSums(wallets) {
+    wallets.forEach(function (w) {
+      if (!Array.isArray(w.balanceSamples) || w.balanceSamples.length === 0) {
+        throw new Error('claims-engine: sustained/time-weighted claims need balanceSamples on every wallet');
+      }
+    });
+    var heights = wallets[0].balanceSamples.map(function (s) { return s.blockHeight; });
+    wallets.slice(1).forEach(function (w) {
+      var mine = w.balanceSamples.map(function (s) { return s.blockHeight; });
+      if (mine.length !== heights.length || mine.some(function (h, i) { return h !== heights[i]; })) {
+        throw new Error('claims-engine: balanceSamples block heights must match across wallets');
+      }
+    });
+    return heights.map(function (blockHeight, i) {
+      return {
+        blockHeight: blockHeight,
+        amount: wallets.reduce(function (sum, w) { return sum + toBigInt(w.balanceSamples[i].amount, 'balanceSample.amount'); }, 0n),
+      };
+    });
+  }
+
+  function txsInWindow(txs, days, nowNs) {
     var now = toBigInt(nowNs, 'nowNs');
     var start = now - BigInt(toDays(days, 'days')) * NS_PER_DAY;
-    return snapshot.txs.filter(function (tx) {
+    return txs.filter(function (tx) {
       var ts = toBigInt(tx.blockTimestampNs, 'tx.blockTimestampNs');
       return ts >= start && ts <= now;
     });
@@ -258,7 +364,7 @@ touched the chain. A report with no AI summary means "not analysed", not
 
   function txCountInWindow(snapshot, days, nowNs) {
     requireSnapshot(snapshot);
-    var count = txsInWindow(snapshot, days, nowNs).filter(function (tx) { return tx.status === 'Success'; }).length;
+    var count = txsInWindow(snapshot.txs, days, nowNs).filter(function (tx) { return tx.status === 'Success'; }).length;
     return { id: 'tx_count_in_window', passed: count >= 1, value: count, threshold: toDays(days, 'days') };
   }
 
@@ -266,7 +372,7 @@ touched the chain. A report with no AI summary means "not analysed", not
     requireSnapshot(snapshot);
     var accountId = snapshot.account.accountId;
     var sum = 0n;
-    var inWindow = txsInWindow(snapshot, days, nowNs);
+    var inWindow = txsInWindow(snapshot.txs, days, nowNs);
     for (var i = 0; i < inWindow.length; i++) {
       var tx = inWindow[i];
       if (tx.status !== 'Success') continue;
@@ -278,13 +384,54 @@ touched the chain. A report with no AI summary means "not analysed", not
 
   function noFailedTxsInWindow(snapshot, days, nowNs) {
     requireSnapshot(snapshot);
-    var failed = txsInWindow(snapshot, days, nowNs).filter(function (tx) { return tx.status === 'Failure'; }).length;
+    var failed = txsInWindow(snapshot.txs, days, nowNs).filter(function (tx) { return tx.status === 'Failure'; }).length;
     return { id: 'no_failed_txs_in_window', passed: failed === 0, value: failed, threshold: toDays(days, 'days') };
   }
 
-  function evaluateClaims(snapshot, policy, nowNs) {
+  function aggregateBalanceAtLeast(wallets, amountYocto) {
+    var threshold = toBigInt(amountYocto, 'amountYocto');
+    var value = aggregateBalance(wallets);
+    return { id: 'aggregate_balance_at_least', passed: value >= threshold, value: value.toString(), threshold: threshold.toString() };
+  }
+
+  function aggregateTxCountInWindow(wallets, days, nowNs) {
+    var count = txsInWindow(unionTxs(wallets), days, nowNs).filter(function (tx) { return tx.status === 'Success'; }).length;
+    return { id: 'aggregate_tx_count_in_window', passed: count >= 1, value: count, threshold: toDays(days, 'days') };
+  }
+
+  function aggregateVolumeInWindow(wallets, days, nowNs) {
+    var ids = {};
+    wallets.forEach(function (w) { ids[w.account.accountId] = true; });
+    var sum = 0n;
+    var inWindow = txsInWindow(unionTxs(wallets), days, nowNs);
+    for (var i = 0; i < inWindow.length; i++) {
+      var tx = inWindow[i];
+      if (tx.status !== 'Success') continue;
+      if (!ids[tx.senderId] && !ids[tx.receiverId]) continue;
+      sum += toBigInt(tx.amountYocto, 'tx.amountYocto');
+    }
+    return { id: 'aggregate_volume_in_window', passed: sum > 0n, value: sum.toString(), threshold: toDays(days, 'days') };
+  }
+
+  function sustainedBalanceAtLeast(wallets, amountYocto) {
+    var threshold = toBigInt(amountYocto, 'amountYocto');
+    var sums = sampleSums(wallets);
+    var min = sums.reduce(function (m, s) { return s.amount < m ? s.amount : m; }, sums[0].amount);
+    return { id: 'sustained_balance_at_least', passed: min >= threshold, value: min.toString(), threshold: threshold.toString() };
+  }
+
+  function timeWeightedBalanceAtLeast(wallets, amountYocto) {
+    var threshold = toBigInt(amountYocto, 'amountYocto');
+    var sums = sampleSums(wallets);
+    var total = sums.reduce(function (acc, s) { return acc + s.amount; }, 0n);
+    var avg = total / BigInt(sums.length);
+    return { id: 'time_weighted_balance_at_least', passed: avg >= threshold, value: avg.toString(), threshold: threshold.toString() };
+  }
+
+  function evaluateClaims(snapshotOrBundle, policy, nowNs) {
     if (policy === void 0) policy = {};
-    requireSnapshot(snapshot);
+    var wallets = normalizeBundle(snapshotOrBundle);
+    var snapshot = wallets[0];
     if (policy === null || typeof policy !== 'object' || Array.isArray(policy)) {
       throw new Error('claims-engine: policy must be an object');
     }
@@ -304,7 +451,130 @@ touched the chain. A report with no AI summary means "not analysed", not
       claims.push({ id: vol.id, passed: BigInt(vol.value) >= minVol, value: vol.value, threshold: vol.threshold });
     }
     if (policy.noFailedWindowDays !== undefined) claims.push(noFailedTxsInWindow(snapshot, policy.noFailedWindowDays, nowNs));
+    if (policy.aggregateBalanceAtLeastYocto !== undefined) claims.push(aggregateBalanceAtLeast(wallets, policy.aggregateBalanceAtLeastYocto));
+    if (policy.aggregateMinTxCount !== undefined) {
+      if (policy.aggregateTxWindowDays === undefined) throw new Error('claims-engine: policy.aggregateMinTxCount requires policy.aggregateTxWindowDays');
+      var aggCounted = aggregateTxCountInWindow(wallets, policy.aggregateTxWindowDays, nowNs);
+      var aggMin = toBigInt(policy.aggregateMinTxCount, 'policy.aggregateMinTxCount');
+      claims.push({ id: aggCounted.id, passed: BigInt(aggCounted.value) >= aggMin, value: aggCounted.value, threshold: aggCounted.threshold });
+    }
+    if (policy.aggregateMinVolumeYocto !== undefined) {
+      if (policy.aggregateVolumeWindowDays === undefined) throw new Error('claims-engine: policy.aggregateMinVolumeYocto requires policy.aggregateVolumeWindowDays');
+      var aggVol = aggregateVolumeInWindow(wallets, policy.aggregateVolumeWindowDays, nowNs);
+      var aggMinVol = toBigInt(policy.aggregateMinVolumeYocto, 'policy.aggregateMinVolumeYocto');
+      claims.push({ id: aggVol.id, passed: BigInt(aggVol.value) >= aggMinVol, value: aggVol.value, threshold: aggVol.threshold });
+    }
+    if (policy.sustainedBalanceAtLeastYocto !== undefined) claims.push(sustainedBalanceAtLeast(wallets, policy.sustainedBalanceAtLeastYocto));
+    if (policy.timeWeightedBalanceAtLeastYocto !== undefined) claims.push(timeWeightedBalanceAtLeast(wallets, policy.timeWeightedBalanceAtLeastYocto));
     return { claims: claims, allPassed: claims.every(function (c) { return c.passed; }) };
+  }
+
+  // --- Score: mirror of src/score.js (score-v1) ---
+  var YOCTO_PER_NEAR = 10n ** 24n;
+
+  function tierPoints(valueYocto, tiers) {
+    var points = 0;
+    for (var i = 0; i < tiers.length; i++) {
+      var thresholdYocto = (BigInt(Math.round(tiers[i][0] * 10)) * YOCTO_PER_NEAR) / 10n;
+      if (valueYocto >= thresholdYocto) points = tiers[i][1];
+    }
+    return points;
+  }
+
+  function bandFor(value) {
+    if (value >= 800) return 'strong';
+    if (value >= 600) return 'solid';
+    if (value >= 300) return 'building';
+    return 'thin';
+  }
+
+  function distinctWeeks(timestampsNs) {
+    var weeks = {};
+    timestampsNs.forEach(function (ts) {
+      var ms = Number(BigInt(ts) / 1000000n);
+      var d = new Date(ms);
+      var day = (d.getUTCDay() + 6) % 7;
+      var monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+      var yearStart = Date.UTC(monday.getUTCFullYear(), 0, 1);
+      var week = Math.floor((monday.getTime() - yearStart) / (7 * 86400 * 1000)) + 1;
+      weeks[monday.getUTCFullYear() + '-W' + String(week).padStart(2, '0')] = true;
+    });
+    return Object.keys(weeks).length;
+  }
+
+  function computeScore(snapshotOrBundle, opts, nowNs) {
+    if (opts === void 0) opts = {};
+    var wallets = normalizeBundle(snapshotOrBundle);
+    var components = [];
+    function push(id, label, points, max, measured) {
+      components.push({ id: id, label: label, points: points, max: max, measured: measured });
+    }
+    var sampled = null;
+    try {
+      sampled = sampleSums(wallets);
+    } catch (e) {
+      sampled = null;
+    }
+    if (sampled) {
+      var min = sampled.reduce(function (m, s) { return s.amount < m ? s.amount : m; }, sampled[0].amount);
+      var total = sampled.reduce(function (acc, s) { return acc + s.amount; }, 0n);
+      var avg = total / BigInt(sampled.length);
+      push('sustained_balance', 'Lowest sampled balance held', tierPoints(min, [[0.1, 50], [0.5, 120], [1, 200], [5, 260], [10, 300]]), 300, true);
+      push('time_weighted_balance', 'Average sampled balance', tierPoints(avg, [[0.1, 40], [0.5, 80], [1, 130], [5, 170], [10, 200]]), 200, true);
+    } else {
+      push('sustained_balance', 'Lowest sampled balance held', 0, 300, false);
+      push('time_weighted_balance', 'Average sampled balance', 0, 200, false);
+    }
+    var txs = unionTxs(wallets);
+    var now = nowNs === undefined ? null : BigInt(nowNs);
+    if (opts.txWindowDays !== undefined && now !== null) {
+      var days = opts.txWindowDays;
+      if (typeof days !== 'number' || !Number.isInteger(days) || days < 0) throw new Error('score: txWindowDays must be a non-negative integer number of days');
+      var start = now - BigInt(days) * NS_PER_DAY;
+      var inWindow = txs.filter(function (tx) {
+        var ts = BigInt(tx.blockTimestampNs);
+        return ts >= start && ts <= now && tx.status === 'Success';
+      });
+      var count = inWindow.length;
+      var weeks = distinctWeeks(inWindow.map(function (tx) { return tx.blockTimestampNs; }));
+      var points = count >= 30 ? 170 : count >= 10 ? 140 : count >= 3 ? 90 : count >= 1 ? 40 : 0;
+      if (weeks >= 3 && points > 0) points = Math.min(200, points + 30);
+      push('activity', 'Successful transactions and week spread', points, 200, true);
+    } else {
+      push('activity', 'Successful transactions and week spread', 0, 200, false);
+    }
+    if (opts.volumeWindowDays !== undefined && now !== null) {
+      var vDays = opts.volumeWindowDays;
+      if (typeof vDays !== 'number' || !Number.isInteger(vDays) || vDays < 0) throw new Error('score: volumeWindowDays must be a non-negative integer number of days');
+      var vStart = now - BigInt(vDays) * NS_PER_DAY;
+      var ids = {};
+      wallets.forEach(function (w) { ids[w.account.accountId] = true; });
+      var sum = 0n;
+      txs.forEach(function (tx) {
+        var ts = BigInt(tx.blockTimestampNs);
+        if (ts < vStart || ts > now || tx.status !== 'Success') return;
+        if (!ids[tx.senderId] && !ids[tx.receiverId]) return;
+        sum += BigInt(tx.amountYocto);
+      });
+      push('volume', 'Volume in window', tierPoints(sum, [[0.1, 30], [0.5, 60], [1, 100], [5, 130], [10, 150]]), 150, true);
+    } else {
+      push('volume', 'Volume in window', 0, 150, false);
+    }
+    if (opts.noFailedWindowDays !== undefined && now !== null) {
+      var fDays = opts.noFailedWindowDays;
+      if (typeof fDays !== 'number' || !Number.isInteger(fDays) || fDays < 0) throw new Error('score: noFailedWindowDays must be a non-negative integer number of days');
+      var fStart = now - BigInt(fDays) * NS_PER_DAY;
+      var failed = txs.filter(function (tx) {
+        var ts = BigInt(tx.blockTimestampNs);
+        return ts >= fStart && ts <= now && tx.status === 'Failure';
+      }).length;
+      push('no_failed', 'No failed transactions in window', failed === 0 ? 100 : 0, 100, true);
+    } else {
+      push('no_failed', 'No failed transactions in window', 0, 100, false);
+    }
+    push('staked', 'Staked balance held', aggregateStaked(wallets) > 0n ? 50 : 0, 50, true);
+    var value = components.reduce(function (sum, c) { return sum + c.points; }, 0);
+    return { version: 'score-v1', value: value, band: bandFor(value), components: components };
   }
 
   // --- Verify: mirror of src/verify-report.js ---
@@ -333,12 +603,32 @@ touched the chain. A report with no AI summary means "not analysed", not
     var checks = [];
     function check(name, passed, detail) { checks.push({ check: name, passed: passed, detail: detail }); }
 
+    var snapshots = [disclosurePackage.snapshot];
+    var linked = Array.isArray(disclosurePackage.linked) ? disclosurePackage.linked : [];
+    for (var li = 0; li < linked.length; li++) {
+      if (linked[li] && typeof linked[li] === 'object' && linked[li].snapshot) snapshots.push(linked[li].snapshot);
+    }
+    var bundle = { wallets: snapshots };
+
     if (typeof disclosurePackage.address !== 'string' || disclosurePackage.address.length === 0) {
       check('prover_binding', false, 'Disclosure package has no address.');
     } else if (typeof report.prover !== 'string' || report.prover.length === 0) {
       check('prover_binding', false, 'Report has no prover commitment.');
     } else if ((await sha256Hex(disclosurePackage.address)) !== report.prover) {
       check('prover_binding', false, 'Disclosure address does not hash to the report prover commitment.');
+    } else if (linked.length > 0) {
+      var linkedProvers = Array.isArray(report.linkedProvers) ? report.linkedProvers : [];
+      var badLink = -1;
+      for (var bi = 0; bi < linked.length; bi++) {
+        var entryAddr = linked[bi] && linked[bi].address;
+        var entryHash = typeof entryAddr === 'string' && entryAddr.length > 0 ? await sha256Hex(entryAddr) : null;
+        if (entryHash === null || entryHash !== linkedProvers[bi]) { badLink = bi; break; }
+      }
+      if (badLink >= 0) {
+        check('prover_binding', false, 'Linked wallet ' + badLink + ' does not hash to the report linked-prover commitment.');
+      } else {
+        check('prover_binding', true, 'Disclosure addresses hash to the report prover commitments.');
+      }
     } else {
       check('prover_binding', true, 'Disclosure address hashes to the report prover commitment.');
     }
@@ -377,8 +667,7 @@ touched the chain. A report with no AI summary means "not analysed", not
     }
 
     try {
-      var snap = disclosurePackage.snapshot;
-      var computedData = await computeDataHash(snap.account.accountId, snap.account.amount, snap.account.locked, snap.txs);
+      var computedData = await dataHashForSnapshots(snapshots);
       var ref = report.evidenceRefs && report.evidenceRefs.dataHash;
       if (computedData === ref) {
         check('data_hash', true, 'Recomputed data hash matches the report evidence reference.');
@@ -393,7 +682,7 @@ touched the chain. A report with no AI summary means "not analysed", not
       if (!Array.isArray(report.claims)) {
         check('claims', false, 'Report claims are not an array.');
       } else {
-        var rerun = evaluateClaims(disclosurePackage.snapshot, policy, nowNs);
+        var rerun = evaluateClaims(bundle, policy, nowNs);
         var byId = {};
         rerun.claims.forEach(function (c) { byId[c.id] = c; });
         var failure = null;
@@ -431,6 +720,49 @@ touched the chain. A report with no AI summary means "not analysed", not
     } catch (err) {
       check('claims', false, 'Claim re-run failed: ' + err.message);
     }
+
+    try {
+      if (report.score === null || report.score === undefined) {
+        check('score', true, 'Report carries no score (not scored).');
+      } else {
+        var windows = { txWindowDays: policy.txWindowDays, volumeWindowDays: policy.volumeWindowDays, noFailedWindowDays: policy.noFailedWindowDays };
+        var againScore = computeScore(bundle, windows, nowNs);
+        var sameScore = againScore.version === report.score.version &&
+          againScore.value === report.score.value &&
+          againScore.band === report.score.band &&
+          JSON.stringify(againScore.components) === JSON.stringify(report.score.components);
+        if (sameScore) {
+          check('score', true, 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').');
+        } else {
+          check('score', false, 'Score differs on re-run (report: ' + report.score.value + ', re-run: ' + againScore.value + ').');
+        }
+      }
+    } catch (err) {
+      check('score', false, 'Score re-run failed: ' + err.message);
+    }
+
+    (function () {
+      if (linked.length === 0) {
+        check('link_proofs', true, 'No linked wallets to prove.');
+      } else {
+        var allTxs = [];
+        snapshots.forEach(function (s) { (s.txs || []).forEach(function (t) { allTxs.push(t); }); });
+        var missing = -1;
+        for (var mi = 0; mi < linked.length; mi++) {
+          var entry = linked[mi];
+          var found = null;
+          for (var ti = 0; ti < allTxs.length; ti++) {
+            if (allTxs[ti].hash === entry.linkTxHash) { found = allTxs[ti]; break; }
+          }
+          if (!found || found.senderId !== entry.address || found.receiverId !== disclosurePackage.address || found.status !== 'Success') { missing = mi; break; }
+        }
+        if (missing >= 0) {
+          check('link_proofs', false, 'Linked wallet ' + missing + ' has no successful linking transfer to the primary address.');
+        } else {
+          check('link_proofs', true, 'All ' + linked.length + ' linked wallet(s) proved ownership by a transfer to the primary address.');
+        }
+      }
+    })();
 
     (function () {
       var reasons = [];

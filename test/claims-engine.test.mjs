@@ -175,3 +175,51 @@ test('engine rejects malformed amounts and windows', () => {
   assert.throws(() => txCountInWindow(s, 1.5, NOW), /non-negative integer number of days/);
   assert.throws(() => balanceAtLeast({ account: { amount: 'abc', locked: '0' }, txs: [] }, '1'), /non-negative integer/);
 });
+
+test('aggregateBalanceAtLeast: sums balances across wallets', () => {
+  const a = snapshot();
+  const b = snapshot({ account: { accountId: 'bob.testnet', amount: '3000000000000000000000000', locked: '0', storage_usage: 182, blockHeight: 100 } });
+  const r = evaluateClaims({ wallets: [a, b] }, { aggregateBalanceAtLeastYocto: '13000000000000000000000000' }, NOW);
+  assert.equal(r.claims[0].id, 'aggregate_balance_at_least');
+  assert.equal(r.claims[0].value, '13000000000000000000000000');
+  assert.equal(r.claims[0].passed, true);
+  assert.equal(evaluateClaims({ wallets: [a, b] }, { aggregateBalanceAtLeastYocto: '13000000000000000000000001' }, NOW).allPassed, false);
+});
+
+test('aggregate volume/count: union txs counted once, including transfers between own wallets', () => {
+  const shared = tx({ hash: 'S'.repeat(43), senderId: 'alice.testnet', receiverId: 'bob.testnet', amountYocto: '2000000000000000000000000' });
+  const a = snapshot({ txs: [shared] });
+  const b = snapshot({ account: { accountId: 'bob.testnet', amount: '1000000000000000000000000', locked: '0', storage_usage: 182, blockHeight: 100 }, txs: [shared] });
+  const r = evaluateClaims({ wallets: [a, b] }, { aggregateMinTxCount: 1, aggregateTxWindowDays: 30, aggregateMinVolumeYocto: '2000000000000000000000000', aggregateVolumeWindowDays: 30 }, NOW);
+  assert.equal(r.claims.find((c) => c.id === 'aggregate_tx_count_in_window').value, 1);
+  assert.equal(r.claims.find((c) => c.id === 'aggregate_volume_in_window').value, '2000000000000000000000000');
+  assert.equal(r.allPassed, true);
+});
+
+test('sustained + time-weighted: min and mean of sampled sums', () => {
+  const samples = (amounts) => amounts.map((amount, i) => ({ blockHeight: 90 + i, amount }));
+  const a = snapshot({ balanceSamples: samples(['10000000000000000000000000', '9000000000000000000000000', '11000000000000000000000000']) });
+  const r = evaluateClaims(a, { sustainedBalanceAtLeastYocto: '9000000000000000000000000', timeWeightedBalanceAtLeastYocto: '10000000000000000000000000' }, NOW);
+  assert.equal(r.claims.find((c) => c.id === 'sustained_balance_at_least').value, '9000000000000000000000000');
+  assert.equal(r.claims.find((c) => c.id === 'sustained_balance_at_least').passed, true);
+  assert.equal(r.claims.find((c) => c.id === 'time_weighted_balance_at_least').value, '10000000000000000000000000');
+  assert.equal(r.claims.find((c) => c.id === 'time_weighted_balance_at_least').passed, true);
+  // A flash dip below the sustained threshold fails sustained but not the mean.
+  assert.equal(evaluateClaims(a, { sustainedBalanceAtLeastYocto: '9500000000000000000000000' }, NOW).allPassed, false);
+});
+
+test('sustained claims without samples, or with misaligned samples, throw', () => {
+  const a = snapshot();
+  assert.throws(() => evaluateClaims(a, { sustainedBalanceAtLeastYocto: '1' }, NOW), /balanceSamples/);
+  const b = snapshot({ balanceSamples: [{ blockHeight: 90, amount: '1000' }, { blockHeight: 95, amount: '1000' }] });
+  const c = snapshot({ account: { accountId: 'carol.testnet', amount: '1000', locked: '0', storage_usage: 182, blockHeight: 100 }, balanceSamples: [{ blockHeight: 91, amount: '1000' }, { blockHeight: 95, amount: '1000' }] });
+  assert.throws(() => evaluateClaims({ wallets: [b, c] }, { sustainedBalanceAtLeastYocto: '1' }, NOW), /block heights must match/);
+});
+
+test('evaluateClaims: old single-wallet policies evaluate exactly as before', () => {
+  const s = snapshot({ txs: [tx({ amountYocto: '1500000000000000000000000' })] });
+  const r = evaluateClaims(s, { balanceAtLeastYocto: '10000000000000000000000000', minTxCount: 1, txWindowDays: 30 }, NOW);
+  assert.deepEqual(r.claims.map((c) => c.id), ['balance_at_least', 'tx_count_in_window']);
+  assert.equal(r.allPassed, true);
+  assert.throws(() => evaluateClaims({ wallets: [] }, {}, NOW), /at least one wallet/);
+});

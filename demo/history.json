@@ -24,6 +24,12 @@
       "senderId": "veilproof-demo.testnet",
       "receiverId": "veilproof.testnet",
       "amountNear": "0.1"
+    },
+    {
+      "hash": "DNYq6teYhtgPfoBijzkNLENHuAatFzX5BNfZd1366DaN",
+      "senderId": "demo2.veilproof.testnet",
+      "receiverId": "veilproof-demo.testnet",
+      "amountNear": "0.5"
     }
   ]
 }

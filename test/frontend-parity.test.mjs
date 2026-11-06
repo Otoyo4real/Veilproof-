@@ -23,6 +23,7 @@ import * as nodeEngine from '../src/claims-engine.js';
 import * as nodeReport from '../src/report.js';
 import * as nodeDisclosure from '../src/disclosure.js';
 import * as nodeOnchain from '../src/onchain.js';
+import * as nodeScore from '../src/score.js';
 
 // Browser path.
 import { canonicalJson as browserCanonical } from '../public/js/canonical.js';
@@ -30,6 +31,7 @@ import * as browserEngine from '../public/js/claims-engine.js';
 import * as browserReport from '../public/js/report.js';
 import * as browserDisclosure from '../public/js/disclosure.js';
 import * as browserOnchain from '../public/js/onchain.js';
+import * as browserScore from '../public/js/score.js';
 import { sha256Hex as browserSha256Hex, randomHex } from '../public/js/crypto.js';
 
 const POLICY_VERSION = 'veilproof-policy-v1';
@@ -220,13 +222,14 @@ test('disclosure parity: package, clean check, leak tripwire', async () => {
 // Live smoke checks for the browser RPC path (one cheap call each).
 // The balance is only asserted as a sanity band: the demo wallet was
 // funded with 10 NEAR and the recorded demo transfers moved a net
-// +0.65 NEAR in (see demo/history.json), so it sits between 10 and
-// 11 NEAR. This is not a balance test — onchain.test.mjs owns that.
+// +1.15 NEAR in (see demo/history.json — the 0.5 NEAR link transfer
+// from the linked wallet is the fifth entry), so it sits between 11
+// and 12 NEAR. This is not a balance test — onchain.test.mjs owns that.
 test('browser onchain live: getAccount returns the demo wallet', async () => {
   const account = await browserOnchain.getAccount('veilproof-demo.testnet');
   assert.equal(account.accountId, 'veilproof-demo.testnet');
   const amount = BigInt(account.amount);
-  assert.ok(amount > 10n * 10n ** 24n && amount < 11n * 10n ** 24n, `unexpected demo balance ${account.amount}`);
+  assert.ok(amount > 11n * 10n ** 24n && amount < 12n * 10n ** 24n, `unexpected demo balance ${account.amount}`);
   assert.ok(account.blockHeight > 0);
 });
 
@@ -237,4 +240,57 @@ test('browser onchain live: fetchAccountSnapshot with no txs', async () => {
     snap.dataHash,
     await browserOnchain.computeDataHash('veilproof-demo.testnet', snap.account.amount, snap.account.locked, []),
   );
+});
+
+test('score parity: browser and Node compute the same score', () => {
+  const withSamples = {
+    ...SNAPSHOT,
+    balanceSamples: [
+      { blockHeight: 90, amount: '5000000000000000000000000' },
+      { blockHeight: 95, amount: '5000000000000000000000000' },
+    ],
+  };
+  const windows = { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 };
+  assert.deepEqual(browserScore.computeScore(withSamples, windows, NOW_NS), nodeScore.computeScore(withSamples, windows, NOW_NS));
+  assert.deepEqual(browserScore.computeScore({ wallets: [withSamples, SNAPSHOT] }, windows, NOW_NS), nodeScore.computeScore({ wallets: [withSamples, SNAPSHOT] }, windows, NOW_NS));
+});
+
+test('multi data hash parity: browser and Node agree on multi-wallet bundles', async () => {
+  const second = {
+    account: { accountId: 'bob.testnet', amount: '1000000000000000000000000', locked: '0', storage_usage: 1000, blockHeight: 100 },
+    txs: [],
+    blockHeight: 100,
+  };
+  assert.equal(await browserOnchain.dataHashForSnapshots([SNAPSHOT]), nodeOnchain.dataHashForSnapshots([SNAPSHOT]));
+  assert.equal(await browserOnchain.dataHashForSnapshots([SNAPSHOT, second]), nodeOnchain.dataHashForSnapshots([SNAPSHOT, second]));
+  assert.equal(
+    await browserOnchain.computeMultiDataHash([SNAPSHOT, second]),
+    nodeOnchain.computeMultiDataHash([SNAPSHOT, second]),
+  );
+});
+
+test('report + disclosure parity with score and linked wallets', async () => {
+  const prover = await browserSha256Hex('alice.testnet');
+  const linked = await browserSha256Hex('bob.testnet');
+  const claims = nodeEngine.evaluateClaims(SNAPSHOT, POLICY, NOW_NS).claims;
+  const score = nodeScore.computeScore(SNAPSHOT, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, NOW_NS);
+  const args = {
+    proverAddressHash: prover,
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: SNAPSHOT.dataHash, attestationRef: null },
+    expiresAt: '1825497600000000000',
+    linkedProverHashes: [linked],
+    score,
+  };
+  const nodeBuilt = nodeReport.buildReport(args);
+  const browserBuilt = browserReport.buildReport(args);
+  nodeBuilt.reportId = 'fixed-report-id';
+  browserBuilt.reportId = 'fixed-report-id';
+  nodeBuilt.createdAt = '2026-11-06T00:00:00.000Z';
+  browserBuilt.createdAt = '2026-11-06T00:00:00.000Z';
+  assert.deepEqual(browserBuilt, nodeBuilt);
+  assert.equal(browserBuilt.score.value, score.value);
+  assert.deepEqual(browserBuilt.linkedProvers, [linked]);
 });

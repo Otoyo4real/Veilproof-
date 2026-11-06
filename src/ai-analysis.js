@@ -1,20 +1,25 @@
-// VeilProof NEAR AI analysis — TEE-attested consistency check of claims.
+// VeilProof NEAR AI analysis — TEE-attested consistency check of claims
+// AND advisory underwriting judgment.
 //
-// The model reads ONLY claim-level data: claim ids, passed/value/threshold
-// and aggregate metrics (counts, volumes, window days). It never sees the
-// wallet address, never sees a transaction hash, never sees the raw
-// snapshot. Sanitisation is an allowlist, not a denylist: only the fields
-// named in sanitiseClaims / sanitiseMetrics ever enter a request payload,
-// so a caller cannot leak the address by stuffing it into the metrics.
+// Two jobs share this module, both reading ONLY claim-level data:
 //
-// The model does NOT verify anything about the chain. Its only job is
-// internal consistency: does each claim agree with the metrics it was
-// evaluated from? Chain truth is verified deterministically by
-// src/verify-report.js (re-fetch + re-run). The model's verdict is also
-// cross-checked here by checkClaimsConsistent: a 'consistent' verdict
-// from the model is overridden to 'inconsistent' when a claim
-// contradicts itself (e.g. passed=true while value < threshold). The
-// check can only make a verdict stricter, never looser.
+// 1. Consistency (analyseClaims): does each claim agree with the
+//    metrics it was evaluated from? The model verifies nothing about
+//    the chain — chain truth is verified deterministically by
+//    src/verify-report.js (re-fetch + re-run).
+// 2. Underwriting (analyseUnderwriting): given the deterministic
+//    score (score-v1, recomputable by any verifier) and the same
+//    claim-level facts, is this agent a good risk to lend to? The
+//    verdict is ADVISORY — it never changes a report's validity, and
+//    the deterministic guard can only tighten it (a 'lend' on a thin
+//    score < 300 becomes a 'decline'). The score is the verifiable
+//    fact; the AI's judgment is the opinion on top of it.
+//
+// Sanitisation is an allowlist, not a denylist: only the fields named
+// in sanitiseClaims / sanitiseMetrics / sanitiseScore ever enter a
+// request payload, so a caller cannot leak the address by stuffing it
+// into the metrics. The model never sees the wallet address, never
+// sees a transaction hash, never sees the raw snapshot.
 //
 // Attestation follows the Genesis worker pattern (see
 // ~/workspace/genesis/src/worker-llm.js, read-only reference): a
@@ -226,6 +231,102 @@ export function parseModelOutput(content) {
   return { verdict: parsed.verdict, points };
 }
 
+// The deterministic score, reduced to exactly the fields the model
+// may see: version, value (0–1000), band, and per-component points.
+// Throws on malformed input, like the other sanitise functions.
+export function sanitiseScore(score) {
+  if (!isObject(score)) {
+    throw new Error('ai-analysis: score must be an object');
+  }
+  if (typeof score.version !== 'string' || score.version.length === 0) {
+    throw new Error('ai-analysis: score.version must be a non-empty string');
+  }
+  if (typeof score.value !== 'number' || !Number.isInteger(score.value) || score.value < 0 || score.value > 1000) {
+    throw new Error('ai-analysis: score.value must be an integer 0-1000');
+  }
+  if (!['thin', 'building', 'solid', 'strong'].includes(score.band)) {
+    throw new Error('ai-analysis: score.band must be thin, building, solid or strong');
+  }
+  if (!Array.isArray(score.components)) {
+    throw new Error('ai-analysis: score.components must be an array');
+  }
+  const components = score.components.map((c, i) => {
+    if (!isObject(c) || typeof c.id !== 'string' || c.id.length === 0) {
+      throw new Error(`ai-analysis: score.components[${i}].id must be a non-empty string`);
+    }
+    for (const f of ['points', 'max']) {
+      if (typeof c[f] !== 'number' || !Number.isInteger(c[f]) || c[f] < 0) {
+        throw new Error(`ai-analysis: score.components[${i}].${f} must be a non-negative integer`);
+      }
+    }
+    if (typeof c.measured !== 'boolean') {
+      throw new Error(`ai-analysis: score.components[${i}].measured must be a boolean`);
+    }
+    return { id: c.id, points: c.points, max: c.max, measured: c.measured };
+  });
+  return { version: score.version, value: score.value, band: score.band, components };
+}
+
+// The underwriting prompt. The model judges risk from the deterministic
+// facts only: the score and its components, the claims, the aggregate
+// metrics. It must not treat the score as a decision by itself — the
+// components and the claim pattern are the evidence.
+export function buildUnderwritingPromptMessages(claims, metrics, score, policyVersion) {
+  const payload = JSON.stringify({ policyVersion, claims, metrics, score }, null, 2);
+  return [
+    {
+      role: 'system',
+      content:
+        'You are the VeilProof underwriting judge. You receive a deterministic credit score (0-1000, with per-component points), threshold claims, and aggregate metrics about an anonymous agent prover. There is no wallet address, no transaction, and no identity in your input, and you must not ask for any. '
+        + 'Your job is a RISK JUDGMENT, not a verification: given the score, which components are strong or weak, whether the activity looks sustained or bursty, and whether any claim failed, would you lend to this agent? '
+        + 'The score is a fact computed by deterministic code; treat it as the anchor, but weigh the components: a high score built only on a big balance with no activity history is weaker than a balanced score, and a low sustained-balance component means the balance may be a flash deposit. '
+        + 'Do NOT verify anything about any blockchain, wallet, or transaction: chain data is verified separately by deterministic code, not by you. Do NOT invent facts, amounts, or identities. '
+        + 'Reply with JSON ONLY, no other text, in exactly this shape: {"verdict": "lend" | "lend_with_limits" | "decline", "suggestedLimitNear": <number or null>, "confidence": "low" | "medium" | "high", "points": ["one short sentence per observation"]}. '
+        + 'Use "lend" only for a strong, balanced profile. Use "lend_with_limits" when the profile is decent but a component is weak or unmeasured, and set suggestedLimitNear to a cautious amount in NEAR (or null when you cannot judge an amount). Use "decline" when the score is thin, a claim failed, or the history looks gamed or too short to judge.',
+    },
+    { role: 'user', content: payload },
+  ];
+}
+
+// Parse the underwriting model's reply into
+// { verdict, suggestedLimitNear, confidence, points } or null.
+// Verdict is strict; confidence coerces unknown values to 'low' and
+// suggestedLimitNear coerces non-numbers to null.
+export function parseUnderwritingOutput(content) {
+  if (typeof content !== 'string') return null;
+  let text = content.trim();
+  if (text.length === 0) return null;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) text = fenced[1].trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const braced = text.match(/\{[\s\S]*\}/);
+    if (!braced) return null;
+    try {
+      parsed = JSON.parse(braced[0]);
+    } catch {
+      return null;
+    }
+  }
+  if (!isObject(parsed)) return null;
+  if (!['lend', 'lend_with_limits', 'decline'].includes(parsed.verdict)) return null;
+  if (!Array.isArray(parsed.points)) return null;
+  const points = parsed.points
+    .filter((p) => typeof p === 'string')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+    .map((p) => (p.length > MAX_POINT_LEN ? p.slice(0, MAX_POINT_LEN) : p))
+    .slice(0, MAX_POINTS);
+  const suggestedLimitNear =
+    typeof parsed.suggestedLimitNear === 'number' && Number.isFinite(parsed.suggestedLimitNear) && parsed.suggestedLimitNear >= 0
+      ? parsed.suggestedLimitNear
+      : null;
+  const confidence = ['low', 'medium', 'high'].includes(parsed.confidence) ? parsed.confidence : 'low';
+  return { verdict: parsed.verdict, suggestedLimitNear, confidence, points };
+}
+
 // Preflight attestation: GET the evidence with a fresh nonce and trust
 // it only when the gateway or the first model report echoes that nonce.
 // Never throws: any failure (network, bad JSON, non-2xx, mismatch)
@@ -267,6 +368,63 @@ async function fetchAttestation(fetchImpl, base, model, apiKey) {
   };
 }
 
+// Shared NEAR AI call: attestation preflight, then one completion
+// with the given messages. Returns
+// { status: 'ok', content, attestation } on a non-empty completion, or
+// { status, attestation, error? } with status 'not_configured' |
+// 'api_error' | 'empty_output'. The caller parses `content` for its
+// own job. The attestation is always attempted first; a failed
+// preflight leaves the result unattested but does not abort the call.
+async function callNearAi({ fetchImpl, base, model, apiKey, messages, maxTokens }) {
+  const attestation = await fetchAttestation(fetchImpl, base, model, apiKey);
+  let content;
+  try {
+    const res = await fetchImpl(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'x-no-aliasing': 'true',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.3,
+        max_tokens: maxTokens,
+      }),
+      signal: AbortSignal.timeout(COMPLETION_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      return { status: 'api_error', attestation, error: `completion endpoint returned HTTP ${res.status}` };
+    }
+    const body = await res.json();
+    content = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
+    content = String(content).trim();
+  } catch (err) {
+    return { status: 'api_error', attestation, error: String(err && err.message ? err.message : err).slice(0, 200) };
+  }
+  if (content.length === 0) {
+    return { status: 'empty_output', attestation };
+  }
+  return { status: 'ok', content, attestation };
+}
+
+// Resolve the call options shared by both jobs: key (fail closed),
+// fetch, model, base URL, max tokens (floored at 800 — the model
+// reasons before answering, so a smaller budget returns empty).
+function resolveCallOpts(opts) {
+  const apiKey = process.env.VEILPROOF_NEAR_AI_API_KEY;
+  if (!apiKey) return { status: 'not_configured' };
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') {
+    return { status: 'api_error', error: 'no fetch implementation available' };
+  }
+  const model = opts.model || process.env.VEILPROOF_NEAR_AI_MODEL || DEFAULT_MODEL;
+  const base = (opts.baseUrl || process.env.VEILPROOF_NEAR_AI_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
+  const maxTokens = Math.max(MIN_MAX_TOKENS, opts.maxTokens || DEFAULT_MAX_TOKENS);
+  return { status: 'ok', apiKey, fetchImpl, model, base, maxTokens };
+}
+
 // Analyse evaluated claims with NEAR AI Cloud (TEE).
 //   analyseClaims({ claims, metrics, policyVersion }, opts?)
 // opts: { fetchImpl, model, baseUrl, maxTokens } — all optional; fetch
@@ -280,55 +438,24 @@ export async function analyseClaims({ claims, metrics, policyVersion }, opts = {
     throw new Error('ai-analysis: policyVersion must be a non-empty string');
   }
 
-  const apiKey = process.env.VEILPROOF_NEAR_AI_API_KEY;
-  if (!apiKey) {
-    return { status: 'not_configured', summary: null };
+  const resolved = resolveCallOpts(opts);
+  if (resolved.status !== 'ok') {
+    return { status: resolved.status, summary: null, ...(resolved.error ? { error: resolved.error } : {}) };
   }
 
-  const fetchImpl = opts.fetchImpl || globalThis.fetch;
-  if (typeof fetchImpl !== 'function') {
-    return { status: 'api_error', summary: null, error: 'no fetch implementation available' };
-  }
-  const model = opts.model || process.env.VEILPROOF_NEAR_AI_MODEL || DEFAULT_MODEL;
-  const base = (opts.baseUrl || process.env.VEILPROOF_NEAR_AI_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
-  const maxTokens = Math.max(MIN_MAX_TOKENS, opts.maxTokens || DEFAULT_MAX_TOKENS);
-
-  // Attestation preflight first (a report fetched after the completion
-  // cannot replace preflight evidence). A failed preflight leaves the
-  // summary unattested but does not abort the analysis.
-  const attestation = await fetchAttestation(fetchImpl, base, model, apiKey);
-
-  let content;
-  try {
-    const res = await fetchImpl(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'x-no-aliasing': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        messages: buildPromptMessages(cleanClaims, cleanMetrics, policyVersion),
-        temperature: 0.3,
-        max_tokens: maxTokens,
-      }),
-      signal: AbortSignal.timeout(COMPLETION_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      return { status: 'api_error', summary: null, error: `completion endpoint returned HTTP ${res.status}` };
-    }
-    const body = await res.json();
-    content = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
-    content = String(content).trim();
-  } catch (err) {
-    return { status: 'api_error', summary: null, error: String(err && err.message ? err.message : err).slice(0, 200) };
-  }
-  if (content.length === 0) {
-    return { status: 'empty_output', summary: null };
+  const called = await callNearAi({
+    fetchImpl: resolved.fetchImpl,
+    base: resolved.base,
+    model: resolved.model,
+    apiKey: resolved.apiKey,
+    messages: buildPromptMessages(cleanClaims, cleanMetrics, policyVersion),
+    maxTokens: resolved.maxTokens,
+  });
+  if (called.status !== 'ok') {
+    return { status: called.status, summary: null, ...(called.error ? { error: called.error } : {}) };
   }
 
-  const parsed = parseModelOutput(content);
+  const parsed = parseModelOutput(called.content);
   if (!parsed) {
     return { status: 'unparseable', summary: null };
   }
@@ -346,13 +473,91 @@ export async function analyseClaims({ claims, metrics, policyVersion }, opts = {
     status: 'ok',
     summary: {
       provider: 'near-ai',
-      model,
+      model: resolved.model,
       verdict,
       points,
       attestation: {
-        verifiable: attestation.verifiable,
-        nonceMatched: attestation.nonceMatched,
-        ref: attestation.ref,
+        verifiable: called.attestation.verifiable,
+        nonceMatched: called.attestation.nonceMatched,
+        ref: called.attestation.ref,
+      },
+    },
+  };
+}
+
+// Deterministic underwriting guard (tighten only): a thin score
+// cannot support a lend, however the model weighed the facts.
+// Returns the (possibly tightened) verdict object. Exported so the
+// publish script applies exactly the same rule as the module.
+export function applyUnderwritingGuard(parsed, score) {
+  let { verdict, suggestedLimitNear, confidence, points } = parsed;
+  if (verdict === 'lend' && score.value < 300) {
+    verdict = 'decline';
+    suggestedLimitNear = null;
+    points = [`Deterministic guard: score ${score.value} (thin) cannot support a lend verdict.`, ...points];
+  }
+  return { verdict, suggestedLimitNear, confidence, points };
+}
+
+// Advisory underwriting judgment with NEAR AI Cloud (TEE).
+//   analyseUnderwriting({ claims, metrics, score, policyVersion }, opts?)
+// The model judges risk from the deterministic score + claim facts.
+// Return contract mirrors analyseClaims: { status, summary } with
+// summary null on any failure mode, and the summary shape
+//   { provider, model, role: 'underwriting', verdict,
+//     suggestedLimitNear, confidence, points, attestation }.
+// Deterministic guard (tighten only): a 'lend' verdict on a thin
+// score (< 300) is overridden to 'decline'. The verdict is advisory:
+// it never changes a report's validity, and a report without an
+// underwriting summary is honest ("not analysed").
+export async function analyseUnderwriting({ claims, metrics, score, policyVersion }, opts = {}) {
+  const cleanClaims = sanitiseClaims(claims);
+  const cleanMetrics = sanitiseMetrics(metrics);
+  const cleanScore = sanitiseScore(score);
+  if (typeof policyVersion !== 'string' || policyVersion.length === 0) {
+    throw new Error('ai-analysis: policyVersion must be a non-empty string');
+  }
+
+  const resolved = resolveCallOpts(opts);
+  if (resolved.status !== 'ok') {
+    return { status: resolved.status, summary: null, ...(resolved.error ? { error: resolved.error } : {}) };
+  }
+
+  const called = await callNearAi({
+    fetchImpl: resolved.fetchImpl,
+    base: resolved.base,
+    model: resolved.model,
+    apiKey: resolved.apiKey,
+    messages: buildUnderwritingPromptMessages(cleanClaims, cleanMetrics, cleanScore, policyVersion),
+    maxTokens: resolved.maxTokens,
+  });
+  if (called.status !== 'ok') {
+    return { status: called.status, summary: null, ...(called.error ? { error: called.error } : {}) };
+  }
+
+  const parsed = parseUnderwritingOutput(called.content);
+  if (!parsed) {
+    return { status: 'unparseable', summary: null };
+  }
+
+  // Deterministic guard: a thin score cannot support a lend, however
+  // the model weighed the facts. This can only tighten the verdict.
+  const { verdict, suggestedLimitNear, confidence, points } = applyUnderwritingGuard(parsed, cleanScore);
+
+  return {
+    status: 'ok',
+    summary: {
+      provider: 'near-ai',
+      model: resolved.model,
+      role: 'underwriting',
+      verdict,
+      suggestedLimitNear,
+      confidence,
+      points,
+      attestation: {
+        verifiable: called.attestation.verifiable,
+        nonceMatched: called.attestation.nonceMatched,
+        ref: called.attestation.ref,
       },
     },
   };

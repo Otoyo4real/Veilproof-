@@ -7,9 +7,10 @@ import { createHash } from 'node:crypto';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { evaluateClaims } from '../src/claims-engine.js';
-import { computeDataHash } from '../src/onchain.js';
+import { computeScore } from '../src/score.js';
+import { computeDataHash, dataHashForSnapshots } from '../src/onchain.js';
 import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
-import { buildDisclosurePackage } from '../src/disclosure.js';
+import { buildDisclosurePackage, buildMultiDisclosurePackage } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
 
 const ADDRESS = 'alice.veilproof.testnet';
@@ -26,7 +27,7 @@ const POLICY = {
   volumeWindowDays: 30,
   noFailedWindowDays: 30,
 };
-const CHECK_ORDER = ['prover_binding', 'report_hash', 'evidence_hash', 'policy_hash', 'data_hash', 'claims', 'validity'];
+const CHECK_ORDER = ['prover_binding', 'report_hash', 'evidence_hash', 'policy_hash', 'data_hash', 'claims', 'score', 'link_proofs', 'validity'];
 
 function sha256Hex(s) {
   return createHash('sha256').update(s, 'utf8').digest('hex');
@@ -339,4 +340,82 @@ test('parity: page copy agrees with the Node module', async () => {
       `page and Node disagree on ${name}`,
     );
   }
+});
+
+test('verify score: a scored report recomputes exactly; a tampered score fails', () => {
+  const { report, onchainRecord, disclosurePackage, policy, nowNs } = genuine();
+  const snap = disclosurePackage.snapshot;
+  const score = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, nowNs);
+  const scored = buildReport({
+    proverAddressHash: report.prover,
+    claims: report.claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: report.evidenceRefs,
+    expiresAt: EXPIRES_AT,
+    score,
+  });
+  const record = onchainRecordFor(scored);
+  const ok = verifyReport({ report: scored, onchainRecord: record, disclosurePackage, policy, nowNs });
+  assert.equal(ok.valid, true);
+  assert.equal(checkByName(ok, 'score').passed, true);
+  // Tamper with the reported score value (and re-sign the report hash so only the score check can fail).
+  const tampered = { ...scored, score: { ...score, value: score.value + 1 } };
+  const tamperedRecord = onchainRecordFor(tampered);
+  const bad = verifyReport({ report: tampered, onchainRecord: tamperedRecord, disclosurePackage, policy, nowNs });
+  assert.equal(bad.valid, false);
+  assert.equal(checkByName(bad, 'score').passed, false);
+  assert.equal(checkByName(bad, 'report_hash').passed, true);
+});
+
+test('verify multi-wallet: aggregate claims + link proofs verify; a fake link fails', () => {
+  const primary = snapshot();
+  const linkTx = tx({ hash: 'L'.repeat(43), senderId: 'bob.veilproof.testnet', receiverId: ADDRESS, amountYocto: '10000000000000000000000' });
+  const linkedSnap = {
+    account: { accountId: 'bob.veilproof.testnet', amount: '3000000000000000000000000', locked: '0', storage_usage: 1000, blockHeight: 100 },
+    txs: [linkTx],
+    blockHeight: 100,
+    dataHash: computeDataHash('bob.veilproof.testnet', '3000000000000000000000000', '0', [linkTx]),
+  };
+  const dataHash = dataHashForSnapshots([primary, linkedSnap]);
+  const bundle = { wallets: [primary, linkedSnap] };
+  const policy = { ...POLICY, aggregateBalanceAtLeastYocto: '8000000000000000000000000' };
+  const { claims } = evaluateClaims(bundle, policy, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: sha256Hex(ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    linkedProverHashes: [sha256Hex('bob.veilproof.testnet')],
+  });
+  const record = {
+    report_hash: reportHash(report),
+    evidence_hash: evidenceHash(report.evidenceRefs),
+    policy_hash: policyHash(POLICY_VERSION, policy),
+    valid: true,
+  };
+  const disclosure = buildMultiDisclosurePackage(report, ADDRESS, primary, [
+    { address: 'bob.veilproof.testnet', snapshot: linkedSnap, linkTxHash: 'L'.repeat(43) },
+  ]);
+  const ok = verifyReport({ report, onchainRecord: record, disclosurePackage: disclosure, policy, nowNs: NOW_NS });
+  assert.equal(ok.valid, true);
+  assert.equal(checkByName(ok, 'link_proofs').passed, true);
+  assert.equal(checkByName(ok, 'data_hash').passed, true);
+  // A disclosure whose link tx points at someone else fails link_proofs only.
+  const wrongLink = { ...disclosure, linked: [{ address: 'bob.veilproof.testnet', linkTxHash: 'A'.repeat(43), snapshot: linkedSnap }] };
+  const bad = verifyReport({ report, onchainRecord: record, disclosurePackage: wrongLink, policy, nowNs: NOW_NS });
+  assert.equal(bad.valid, false);
+  assert.equal(checkByName(bad, 'link_proofs').passed, false);
+});
+
+test('verify old reports: no score and no linked wallets still verify', () => {
+  const { report, onchainRecord, disclosurePackage, policy, nowNs } = genuine();
+  assert.equal(report.score, null);
+  assert.deepEqual(report.linkedProvers, []);
+  const result = verifyReport({ report, onchainRecord, disclosurePackage, policy, nowNs });
+  assert.equal(result.valid, true);
+  assert.equal(checkByName(result, 'score').passed, true);
+  assert.equal(checkByName(result, 'link_proofs').passed, true);
 });

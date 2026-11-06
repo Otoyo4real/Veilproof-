@@ -119,6 +119,16 @@ export function policyHash(policyVersion, policy) {
 // - evidenceRefs: { dataHash (64-hex), attestationRef (null for now) }.
 // - expiresAt: nanosecond epoch as a decimal string (same units as the
 //   registry contract's expires_at and the claims engine's nowNs).
+// - linkedProverHashes: SHA-256 hex commitments of any additional
+//   wallets the prover linked to this report (multi-wallet aggregate
+//   claims). Empty (the default) means a single-wallet report. Each
+//   linked wallet's ownership is proven by a linking transfer to the
+//   primary wallet (see verify-report.js link_proofs); the addresses
+//   themselves live only in the disclosure package.
+// - score: null (not scored) or the deterministic score object from
+//   src/score.js ({ version, value, band, components }). A report
+//   without a score is honest ("not scored"); the verifier recomputes
+//   the score when one is present and fails the report when it differs.
 export function buildReport({
   proverAddressHash,
   claims,
@@ -127,6 +137,8 @@ export function buildReport({
   evidenceRefs,
   expiresAt,
   disclosedFields,
+  linkedProverHashes = [],
+  score = null,
 }) {
   requireHexHash(proverAddressHash, 'proverAddressHash');
   if (!Array.isArray(claims)) {
@@ -167,9 +179,31 @@ export function buildReport({
   const disclosedSet = new Set(disclosedIds);
   const disclosedClaims = claims.filter((c) => disclosedSet.has(c.id));
 
+  if (!Array.isArray(linkedProverHashes) || linkedProverHashes.some((h) => !SHA256_HEX.test(h))) {
+    throw new Error('buildReport: linkedProverHashes must be an array of 64-char lowercase hex SHA-256 hashes');
+  }
+  if (score !== null) {
+    if (typeof score !== 'object' || Array.isArray(score)) {
+      throw new Error('buildReport: score must be null or a structured object');
+    }
+    if (typeof score.version !== 'string' || score.version.length === 0) {
+      throw new Error('buildReport: score.version must be a non-empty string');
+    }
+    if (typeof score.value !== 'number' || !Number.isInteger(score.value) || score.value < 0 || score.value > 1000) {
+      throw new Error('buildReport: score.value must be an integer 0-1000');
+    }
+    if (typeof score.band !== 'string' || score.band.length === 0) {
+      throw new Error('buildReport: score.band must be a non-empty string');
+    }
+    if (!Array.isArray(score.components)) {
+      throw new Error('buildReport: score.components must be an array');
+    }
+  }
+
   return {
     reportId: randomBytes(8).toString('hex'),
     prover: proverAddressHash,
+    linkedProvers: [...linkedProverHashes],
     createdAt: new Date().toISOString(),
     claims: disclosedClaims,
     policyVersion,
@@ -177,5 +211,6 @@ export function buildReport({
     evidenceRefs: { attestationRef: evidenceRefs.attestationRef, dataHash: evidenceRefs.dataHash },
     expiresAt,
     disclosed: disclosedClaims.map((c) => c.id),
+    score,
   };
 }

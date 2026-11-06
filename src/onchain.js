@@ -209,6 +209,104 @@ export async function verifyTx(txHash, senderId) {
   };
 }
 
+// SHA-256 hex of the canonical multi-wallet evidence bundle. Used
+// whenever the evidence spans more than one wallet OR any wallet
+// carries balanceSamples (sustained/time-weighted evidence). The
+// payload is the per-wallet data sorted by accountId, each wallet
+// carrying its account state, verified txs (sorted by hash) and its
+// recorded balance samples (sorted by height, empty when absent).
+// The single-wallet, no-samples case keeps using computeDataHash, so
+// reports published before samples existed verify exactly as before.
+// Both the prover and the verifier pick the path by the same rule —
+// multi when wallets.length > 1 or any wallet has balanceSamples —
+// so they always compute the same hash for the same disclosure.
+export function computeMultiDataHash(wallets) {
+  if (!Array.isArray(wallets) || wallets.length === 0) {
+    throw new Error('computeMultiDataHash: wallets must be a non-empty array');
+  }
+  const entries = wallets.map((w) => {
+    const account = w.account ?? w;
+    const txs = w.txs ?? [];
+    const samples = Array.isArray(w.balanceSamples) ? w.balanceSamples : [];
+    return {
+      accountId: account.accountId,
+      amount: String(account.amount),
+      locked: String(account.locked),
+      txs: [...txs]
+        .sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
+        .map((t) => ({
+          amountYocto: String(t.amountYocto),
+          blockHeight: t.blockHeight,
+          blockTimestampNs: String(t.blockTimestampNs),
+          hash: t.hash,
+          receiverId: t.receiverId,
+          senderId: t.senderId,
+          status: t.status,
+        })),
+      balanceSamples: [...samples]
+        .sort((a, b) => a.blockHeight - b.blockHeight)
+        .map((s) => ({ amount: String(s.amount), blockHeight: s.blockHeight })),
+    };
+  });
+  entries.sort((a, b) => (a.accountId < b.accountId ? -1 : a.accountId > b.accountId ? 1 : 0));
+  return createHash('sha256').update(canonicalize({ wallets: entries })).digest('hex');
+}
+
+// The data hash for a set of snapshots, picking the single- or
+// multi-wallet path by the rule above. Snapshots are plain objects
+// shaped like fetchAccountSnapshot's return ({ account, txs,
+// balanceSamples? }).
+export function dataHashForSnapshots(snapshots) {
+  if (!Array.isArray(snapshots) || snapshots.length === 0) {
+    throw new Error('dataHashForSnapshots: snapshots must be a non-empty array');
+  }
+  const needsMulti =
+    snapshots.length > 1 || snapshots.some((s) => Array.isArray(s.balanceSamples) && s.balanceSamples.length > 0);
+  if (!needsMulti) {
+    const s = snapshots[0];
+    return computeDataHash(s.account.accountId, s.account.amount, s.account.locked, s.txs);
+  }
+  return computeMultiDataHash(snapshots);
+}
+
+// Sample an account's balance history at past block heights.
+// NEAR makes ~1 block per second, so a window of W hours spans about
+// W*3600 blocks. `samples` readings are taken ending at the current
+// height, spaced evenly across the window (oldest first). Each reading
+// is a view_account query at that height, so the values are genuine
+// chain state a verifier can re-fetch at the same heights.
+// Throws when the account did not exist at a sampled height (the
+// account is younger than the window) or the node cannot serve that
+// height — the caller should offer a shorter window then.
+export async function sampleBalanceHistory(accountId, { windowHours, samples }) {
+  if (typeof accountId !== 'string' || accountId.length === 0) {
+    throw new Error('sampleBalanceHistory: accountId must be a non-empty string');
+  }
+  if (typeof windowHours !== 'number' || !(windowHours > 0)) {
+    throw new Error('sampleBalanceHistory: windowHours must be a positive number');
+  }
+  if (!Number.isInteger(samples) || samples < 2) {
+    throw new Error('sampleBalanceHistory: samples must be an integer >= 2');
+  }
+  const current = await getAccount(accountId);
+  const step = Math.max(1, Math.floor((windowHours * 3600) / samples));
+  const heights = [];
+  for (let i = samples - 1; i >= 0; i -= 1) {
+    heights.push(current.blockHeight - i * step);
+  }
+  const out = [];
+  for (const height of heights) {
+    if (height < 0) throw new Error('sampleBalanceHistory: sampled height is negative — window too long for this chain');
+    const result = await rpcCall('query', {
+      request_type: 'view_account',
+      account_id: accountId,
+      block_id: height,
+    });
+    out.push({ blockHeight: height, amount: String(result.amount) });
+  }
+  return out;
+}
+
 // Fetch a full snapshot for a claim: current account state plus the
 // verified transactions the prover supplied.
 // txHashes entries may be plain base58 hashes (sender assumed to be the
@@ -216,7 +314,11 @@ export async function verifyTx(txHash, senderId) {
 // whose sender is someone else). Unknown or unobserved hashes are skipped;
 // duplicates are collapsed. Returned txs are sorted by hash, so the
 // snapshot (and its dataHash) is canonical.
-export async function fetchAccountSnapshot(accountId, txHashes = []) {
+// opts.balanceSamples: { windowHours, samples } — when given, the
+// snapshot also carries balanceSamples (see sampleBalanceHistory) and
+// balanceSampleWindowHours, and the dataHash is computed by the
+// multi-wallet path (which covers samples) instead of computeDataHash.
+export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) {
   const account = await getAccount(accountId);
   const seen = new Set();
   const txs = [];
@@ -229,6 +331,11 @@ export async function fetchAccountSnapshot(accountId, txHashes = []) {
     if (verified) txs.push(verified);
   }
   txs.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
-  const dataHash = computeDataHash(accountId, account.amount, account.locked, txs);
-  return { account, txs, blockHeight: account.blockHeight, dataHash };
+  const snapshot = { account, txs, blockHeight: account.blockHeight };
+  if (opts.balanceSamples) {
+    snapshot.balanceSamples = await sampleBalanceHistory(accountId, opts.balanceSamples);
+    snapshot.balanceSampleWindowHours = opts.balanceSamples.windowHours;
+  }
+  snapshot.dataHash = dataHashForSnapshots([snapshot]);
+  return snapshot;
 }

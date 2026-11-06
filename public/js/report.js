@@ -114,6 +114,8 @@ export function buildReport({
   evidenceRefs,
   expiresAt,
   disclosedFields,
+  linkedProverHashes = [],
+  score = null,
 }) {
   requireHexHash(proverAddressHash, 'proverAddressHash');
   if (!Array.isArray(claims)) {
@@ -154,9 +156,31 @@ export function buildReport({
   const disclosedSet = new Set(disclosedIds);
   const disclosedClaims = claims.filter((c) => disclosedSet.has(c.id));
 
+  if (!Array.isArray(linkedProverHashes) || linkedProverHashes.some((h) => !SHA256_HEX.test(h))) {
+    throw new Error('buildReport: linkedProverHashes must be an array of 64-char lowercase hex SHA-256 hashes');
+  }
+  if (score !== null) {
+    if (typeof score !== 'object' || Array.isArray(score)) {
+      throw new Error('buildReport: score must be null or a structured object');
+    }
+    if (typeof score.version !== 'string' || score.version.length === 0) {
+      throw new Error('buildReport: score.version must be a non-empty string');
+    }
+    if (typeof score.value !== 'number' || !Number.isInteger(score.value) || score.value < 0 || score.value > 1000) {
+      throw new Error('buildReport: score.value must be an integer 0-1000');
+    }
+    if (typeof score.band !== 'string' || score.band.length === 0) {
+      throw new Error('buildReport: score.band must be a non-empty string');
+    }
+    if (!Array.isArray(score.components)) {
+      throw new Error('buildReport: score.components must be an array');
+    }
+  }
+
   return {
     reportId: randomHex(8),
     prover: proverAddressHash,
+    linkedProvers: [...linkedProverHashes],
     createdAt: new Date().toISOString(),
     claims: disclosedClaims,
     policyVersion,
@@ -164,5 +188,6 @@ export function buildReport({
     evidenceRefs: { attestationRef: evidenceRefs.attestationRef, dataHash: evidenceRefs.dataHash },
     expiresAt,
     disclosed: disclosedClaims.map((c) => c.id),
+    score,
   };
 }

@@ -1,35 +1,33 @@
-# VeilProof — Prove your onchain money without revealing your wallet
+# VeilProof — portable credit score for agents, without revealing the wallet
 
-Prove financial claims about a wallet (volume, balance, history) without revealing
-which wallet — because revealing it would expose everything.
+Prove an agent's treasury across every wallet it holds, prove the balance was HELD and not just deposited an hour ago, and carry a portable credit score any app can recompute — without publishing a single wallet address.
 
-Live site: https://veilproof22.vercel.app/ — the deployment with the NEAR AI
-key configured, so the AI analysis runs live. (The older
-veilproof-delta.vercel.app deployment has no key configured, so its AI says
-"not analysed".)
+Live site: https://veilproof22.vercel.app/ — the deployment with the NEAR AI key configured, so the AI underwriting runs live. (The older veilproof-delta.vercel.app deployment has no key configured, so its AI says "not analysed".)
 
 ## The idea
 
-A trader or business proves claims like "this wallet did over $1M volume in 30 days"
-without revealing the address. The data lives on the chain, so it is genuine by
-definition. A chosen verifier (e.g. a lender) checks the chain directly. A TEE
-(NEAR AI Cloud) attests the analysis ran correctly. The public sees only a report
-hash on NEAR.
+Agents are starting to pay each other: compute, invoices, OTC deals. Before a deal, the other side wants proof the agent can pay — but publishing a treasury wallet invites targeting, scams and front-running. VeilProof is the proof layer for that deal:
+
+- **Multi-wallet aggregation.** An agent's treasury is usually spread across wallets. Link them all; balances, volume and activity are aggregated across every linked wallet (a transfer between two of your own wallets is counted once). Each linked wallet proves ownership with a small transfer to the primary wallet — only its key holder could have signed it.
+- **Time-weighted reputation.** A snapshot balance proves nothing — anyone can flash a deposit an hour before the report. VeilProof samples the balance at past block heights, so it proves the LOWEST balance held over the window and the average balance, not a momentary peak.
+- **A portable credit score (score-v1).** A deterministic 0–1000 score from onchain facts only: sustained balance (300), time-weighted balance (200), activity and week spread (200), volume (150), no failed transactions (100), staking (50). The rules are published in [docs/score-v1.md](docs/score-v1.md), and the verifier recomputes the exact score from the same snapshots — a tampered score fails verification. Any app holding the disclosure package can recompute it too, so the score is reusable across apps: one report, many verifiers.
+- **An AI underwriter, not an AI verifier.** NEAR AI Cloud (TEE, attested) reads the deterministic score and the claim facts and gives an advisory verdict — lend, lend with limits (with a suggested limit in NEAR), or decline. The verdict is advisory by design: it never changes a report's validity, and a deterministic guard turns any 'lend' on a thin score (< 300) into a 'decline'. The score is the verifiable fact; the AI's judgment is the opinion on top of it.
+- **Private by construction.** The data lives on the chain, so it is genuine by definition. A chosen verifier checks the chain directly. The public sees only a report hash on NEAR and hash commitments of the addresses — never the addresses, never the amounts, never the transaction hashes.
 
 ## What this proves — and what it does not
 
 | Claim | What proves it |
 | --- | --- |
 | The data is genuine | The verifier re-fetches it from the chain. Onchain data cannot be typed in by the user. |
-| The analysis ran correctly | NEAR AI Cloud TEE attestation, nonce-bound to the request. |
+| The balance was held, not flashed | Sampled balance history at past block heights: the lowest sampled balance over the window. |
+| The wallets are all the prover's | Each linked wallet proves ownership with a transfer to the primary wallet. |
+| The credit score is real | The score is deterministic (score-v1, published rules): the verifier recomputes it from the same snapshots. A tampered score fails verification. |
+| The underwriting opinion is honest | NEAR AI Cloud TEE attestation, nonce-bound to the request. Advisory only; a thin score can never support a lend. |
 | The report was not altered | SHA-256 report hash anchored on NEAR; tampering fails verification. |
 | The wallet belongs to the prover | The prover signs a challenge with the wallet key (deterministic, auditable). |
 | The wallet address stays private | Only a hash commitment is published. The address travels only in the private disclosure package to the verifier the prover chose. |
 
-What it does **not** prove: anything about offchain data. VeilProof only ever makes
-claims about onchain data. The backend fetches chain data for the analysis — that
-fetch is auditable (the report records the block height and data hash, and the
-verifier can re-fetch the same data once the address is disclosed to them).
+What it does **not** prove: anything about offchain data. VeilProof only ever makes claims about onchain data. The backend fetches chain data for the analysis — that fetch is auditable (the report records the block height and data hash, and the verifier can re-fetch the same data once the address is disclosed to them).
 
 ## What stays private — and from whom (the honest trade-off)
 
@@ -37,16 +35,15 @@ VeilProof is a **hybrid** privacy model, and it owns that plainly:
 
 | Party | Sees |
 | --- | --- |
-| The public | Only hashes — the report hash, evidence hash and policy hash on NEAR, and a hash commitment of the address. Never the address, never the amounts, never the tx hashes. A tripwire in the report builder enforces this. |
-| The chosen verifier | The address and the data — because they must re-fetch the chain and re-run the checks themselves. That is the point: verification is real, not a trust-me. The prover chooses exactly which verifier gets the disclosure package. |
-| The AI backend | Claim-level aggregates only (balances, counts, volume, windows) — never the address, never the tx hashes. The analysis prompt is sanitised by an allowlist, and any address-like field is rejected before it reaches the model. |
+| The public | Only hashes — the report hash, evidence hash and policy hash on NEAR, and hash commitments of the addresses. Never the addresses, never the amounts, never the tx hashes. A tripwire in the report builder enforces this. |
+| The chosen verifier | The addresses and the data — because they must re-fetch the chain and re-run the checks themselves. That is the point: verification is real, not a trust-me. The prover chooses exactly which verifier gets the disclosure package. |
+| The AI backend | The deterministic score, claim-level aggregates and windows only — never the addresses, never the tx hashes. The analysis prompt is sanitised by an allowlist, and any address-like field is rejected before it reaches the model. |
 
-What VeilProof does **not** do: hide the address from the verifier, or hide
-it from the prover's own browser. A design where even the verifier never
-learns the address would need pure zero-knowledge proving; this project chose
-the hybrid on purpose, because a lender who cannot re-check the chain is a
-lender who has to trust the proof system instead — and that trust is exactly
-what the disclosure model removes.
+What VeilProof does **not** do: hide the address from the verifier, or hide it from the prover's own browser. A design where even the verifier never learns the address would need pure zero-knowledge proving; this project chose the hybrid on purpose, because a lender who cannot re-check the chain is a lender who has to trust the proof system instead — and that trust is exactly what the disclosure model removes.
+
+## The score, in one paragraph
+
+score-v1 is 0–1000 from six components, all computed from the disclosed snapshots under the policy's windows: sustained balance (lowest sampled balance, 300), time-weighted balance (mean sampled balance, 200), activity (success tx count plus a spread bonus when txs span at least 3 ISO weeks, 200), volume (150), no failed transactions (100), staking (50). A feature the prover did not measure scores 0 and is marked unmeasured — the score never hides what it did not see. Bands: 0–299 thin, 300–599 building, 600–799 solid, 800–1000 strong. The full rules, with the exact tier thresholds, are in [docs/score-v1.md](docs/score-v1.md). The score is calibrated for testnet-scale treasuries; a mainnet-scale recalibration would ship as score-v2, and the version field exists so the two are never confused.
 
 ## Separation rules (hard rules from the owner)
 
@@ -86,10 +83,11 @@ testnet registry, and a failed check says so.
 
 - `contract/` — `veilproof_registry` Rust contract (claim hashes only, never
   addresses or amounts in plaintext).
-- `src/` — deterministic claims engine, onchain ingestion (NEAR RPC), report
-  hashing, attestation handling.
+- `src/` — deterministic claims engine, score-v1, onchain ingestion (NEAR RPC),
+  report hashing, attestation handling, AI consistency + underwriting.
 - `api/` — Vercel serverless routes (analysis, verification, report).
 - `public/` — static frontend.
+- `docs/` — published scoring rules (`score-v1.md`) any app can re-run.
 - `test/` — engine + API tests.
 - `demo/` — demo script and sample data.
 

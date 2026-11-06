@@ -5,10 +5,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
   analyseClaims,
+  analyseUnderwriting,
   sanitiseClaims,
   sanitiseMetrics,
+  sanitiseScore,
   checkClaimsConsistent,
   parseModelOutput,
+  parseUnderwritingOutput,
   DEFAULT_MODEL,
 } from '../src/ai-analysis.js';
 import { buildReport } from '../src/report.js';
@@ -310,4 +313,93 @@ test('parseModelOutput tolerates fences and rejects bad verdicts', () => {
   assert.equal(parseModelOutput('not json'), null);
   assert.equal(parseModelOutput(''), null);
   assert.equal(parseModelOutput('{"verdict": "consistent"}'), null);
+});
+
+const SCORE = {
+  version: 'score-v1',
+  value: 850,
+  band: 'strong',
+  components: [
+    { id: 'sustained_balance', points: 300, max: 300, measured: true },
+    { id: 'time_weighted_balance', points: 200, max: 200, measured: true },
+    { id: 'activity', points: 120, max: 200, measured: true },
+    { id: 'volume', points: 130, max: 150, measured: true },
+    { id: 'no_failed', points: 100, max: 100, measured: true },
+    { id: 'staked', points: 0, max: 50, measured: true },
+  ],
+};
+const UNDERWRITE_CONTENT = JSON.stringify({
+  verdict: 'lend',
+  suggestedLimitNear: 5,
+  confidence: 'high',
+  points: ['Strong sustained balance with clean history.'],
+});
+
+test('sanitiseScore keeps the score shape and throws on malformed scores', () => {
+  assert.deepEqual(sanitiseScore({ ...SCORE, extra: 'drop me', address: DEMO_ADDRESS }), SCORE);
+  assert.throws(() => sanitiseScore({ ...SCORE, value: 1001 }), /integer 0-1000/);
+  assert.throws(() => sanitiseScore({ ...SCORE, band: 'great' }), /thin, building, solid or strong/);
+  assert.throws(() => sanitiseScore({ ...SCORE, components: [{ id: 'x', points: 1, max: 1 }] }), /measured must be a boolean/);
+  assert.throws(() => sanitiseScore(null), /must be an object/);
+});
+
+test('parseUnderwritingOutput validates verdicts and coerces limit/confidence', () => {
+  assert.deepEqual(parseUnderwritingOutput(UNDERWRITE_CONTENT), {
+    verdict: 'lend',
+    suggestedLimitNear: 5,
+    confidence: 'high',
+    points: ['Strong sustained balance with clean history.'],
+  });
+  assert.deepEqual(parseUnderwritingOutput('{"verdict": "decline", "points": []}'), {
+    verdict: 'decline',
+    suggestedLimitNear: null,
+    confidence: 'low',
+    points: [],
+  });
+  assert.equal(parseUnderwritingOutput('{"verdict": "maybe", "points": []}'), null);
+  assert.equal(parseUnderwritingOutput('not json'), null);
+});
+
+test('underwriting: lend verdict on a strong score, attested, score in the payload', async () => {
+  const { fetchImpl, calls } = makeMockFetch({ completionContent: UNDERWRITE_CONTENT });
+  const result = await withApiKey('test-key', () =>
+    analyseUnderwriting({ claims: CLAIMS, metrics: METRICS, score: SCORE, policyVersion: POLICY_VERSION }, { fetchImpl }));
+  assert.equal(result.status, 'ok');
+  assert.equal(result.summary.role, 'underwriting');
+  assert.equal(result.summary.verdict, 'lend');
+  assert.equal(result.summary.suggestedLimitNear, 5);
+  assert.equal(result.summary.confidence, 'high');
+  assert.equal(result.summary.attestation.verifiable, true);
+  const completion = calls.find((c) => c.kind === 'completion');
+  const sent = JSON.parse(completion.body.messages[1].content);
+  assert.equal(sent.score.value, 850);
+  assert.equal(JSON.stringify(completion.body).includes(DEMO_ADDRESS), false);
+});
+
+test('underwriting: deterministic guard turns lend into decline on a thin score', async () => {
+  const thin = { ...SCORE, value: 150, band: 'thin' };
+  const { fetchImpl } = makeMockFetch({ completionContent: UNDERWRITE_CONTENT });
+  const result = await withApiKey('test-key', () =>
+    analyseUnderwriting({ claims: CLAIMS, metrics: METRICS, score: thin, policyVersion: POLICY_VERSION }, { fetchImpl }));
+  assert.equal(result.status, 'ok');
+  assert.equal(result.summary.verdict, 'decline');
+  assert.equal(result.summary.suggestedLimitNear, null);
+  assert.match(result.summary.points[0], /Deterministic guard/);
+});
+
+test('underwriting: no key -> not_configured, summary null', async () => {
+  const { fetchImpl } = makeMockFetch({ completionContent: UNDERWRITE_CONTENT });
+  const result = await withApiKey(undefined, () =>
+    analyseUnderwriting({ claims: CLAIMS, metrics: METRICS, score: SCORE, policyVersion: POLICY_VERSION }, { fetchImpl }));
+  assert.equal(result.status, 'not_configured');
+  assert.equal(result.summary, null);
+});
+
+test('underwriting: malformed score throws like malformed claims', async () => {
+  const { fetchImpl } = makeMockFetch({ completionContent: UNDERWRITE_CONTENT });
+  await assert.rejects(
+    withApiKey('test-key', () =>
+      analyseUnderwriting({ claims: CLAIMS, metrics: METRICS, score: { ...SCORE, value: -1 }, policyVersion: POLICY_VERSION }, { fetchImpl })),
+    /integer 0-1000/,
+  );
 });

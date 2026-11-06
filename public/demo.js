@@ -81,9 +81,29 @@ function renderDemo(result, report) {
   const ai =
     report.aiSummary === null
       ? 'Not analysed.'
-      : esc(report.aiSummary.verdict) + ' — NEAR AI Cloud, attested' + (report.aiSummary.attestation?.verifiable ? ' (nonce matched).' : '.');
+      : report.aiSummary.role === 'underwriting'
+        ? 'Underwriting (advisory): ' +
+          esc(report.aiSummary.verdict) +
+          (report.aiSummary.suggestedLimitNear !== null && report.aiSummary.suggestedLimitNear !== undefined
+            ? ' — suggested limit ' + esc(String(report.aiSummary.suggestedLimitNear)) + ' NEAR'
+            : '') +
+          ' — NEAR AI Cloud, attested' + (report.aiSummary.attestation?.verifiable ? ' (nonce matched).' : '.')
+        : esc(report.aiSummary.verdict) + ' — NEAR AI Cloud, attested' + (report.aiSummary.attestation?.verifiable ? ' (nonce matched).' : '.');
+  const scoreLine = report.score
+    ? '<p>Credit score: <strong>' +
+      report.score.value +
+      ' / 1000 (' +
+      esc(report.score.band) +
+      ')</strong> — recomputable by any app from the same disclosure package.</p>' +
+      '<table><tr><th>Component</th><th>Points</th><th>Measured</th></tr>' +
+      report.score.components
+        .map((c) => '<tr><td>' + esc(c.label) + '</td><td>' + c.points + ' / ' + c.max + '</td><td>' + (c.measured ? 'yes' : 'not measured') + '</td></tr>')
+        .join('') +
+      '</table>'
+    : '<p>Credit score: not scored.</p>';
   $('demoFacts').innerHTML =
     '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
+    scoreLine +
     '<p>AI summary: ' + ai + '</p>' +
     '<p>Expires: <span class="mono">' + esc(expires) + '</span></p>';
   $('demoResult').hidden = false;

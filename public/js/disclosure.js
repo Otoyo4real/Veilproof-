@@ -58,6 +58,51 @@ export async function buildDisclosurePackage(report, address, snapshot) {
   };
 }
 
+// Assemble the private disclosure package for a multi-wallet report.
+// linked is an array of { address, snapshot, linkTxHash } — one entry
+// per additional wallet. linkTxHash is the hash of the linking
+// transfer FROM that wallet TO the primary address: only the key
+// holder of the linked wallet could have signed it, so the transfer
+// itself is the ownership proof (verified by verify-report.js).
+// Each linked address must hash to an entry in report.linkedProvers,
+// and each linking transfer must appear among the disclosed txs.
+export async function buildMultiDisclosurePackage(report, address, snapshot, linked = []) {
+  const base = await buildDisclosurePackage(report, address, snapshot);
+  if (!Array.isArray(linked)) {
+    throw new Error('buildMultiDisclosurePackage: linked must be an array');
+  }
+  const linkedProvers = Array.isArray(report.linkedProvers) ? report.linkedProvers : [];
+  const entries = [];
+  for (let i = 0; i < linked.length; i += 1) {
+    const entry = linked[i];
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}] must be an object`);
+    }
+    if (typeof entry.address !== 'string' || entry.address.length === 0) {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}].address must be a non-empty string`);
+    }
+    requireSnapshot(entry.snapshot);
+    if ((await sha256Hex(entry.address)) !== linkedProvers[i]) {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}].address does not hash to report.linkedProvers[${i}]`);
+    }
+    if (typeof entry.linkTxHash !== 'string' || entry.linkTxHash.length === 0) {
+      throw new Error(`buildMultiDisclosurePackage: linked[${i}].linkTxHash must be a non-empty string`);
+    }
+    const tx = entry.snapshot.txs.find((t) => t.hash === entry.linkTxHash);
+    if (!tx || tx.senderId !== entry.address || tx.receiverId !== address || tx.status !== 'Success') {
+      throw new Error(
+        `buildMultiDisclosurePackage: linked[${i}].linkTxHash is not a successful transfer from the linked wallet to the primary address`,
+      );
+    }
+    entries.push({
+      address: entry.address,
+      linkTxHash: entry.linkTxHash,
+      snapshot: JSON.parse(JSON.stringify(entry.snapshot)),
+    });
+  }
+  return { ...base, linked: entries };
+}
+
 // Throw if the public report's canonical JSON contains the raw address
 // or any of the given transaction hashes. Pass the address and the
 // snapshot's tx hashes (as strings). The prover commitment (a hash)

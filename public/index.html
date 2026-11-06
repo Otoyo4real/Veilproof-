@@ -21,16 +21,18 @@
 <section class="hero hero-dark">
   <div class="hero-grid">
     <div>
-      <p class="eyebrow">NEAR Hackathon 2026 · Privacy &amp; Private AI</p>
-      <h1>Prove you&rsquo;re good for it — without handing over your wallet</h1>
-      <p class="lede">A lender, a deal partner, a grant committee — they all want proof before
-      they say yes. Today that proof is your wallet address, and your address is
-      your whole financial life: every balance, every transfer, everyone you have
-      ever paid. VeilProof changes the deal. You prove the one fact they need —
-      you hold at least 1 NEAR, your record is clean — and the world never learns
-      which wallet is yours. The facts come from the chain itself, so they cannot
-      be faked. Only a hash of your address is ever published; the address itself
-      goes only to the verifier you chose, in a private package.</p>
+      <p class="eyebrow">NEAR Hackathon 2026 · Privacy &amp; Private AI · Agent Economy</p>
+      <h1>Prove an agent is good for it — without handing over its wallet</h1>
+      <p class="lede">Agents are starting to pay each other: compute, invoices,
+      OTC deals. Before a deal, the other side wants proof the agent can
+      pay — but publishing a treasury wallet invites targeting, scams and
+      front-running. VeilProof changes the deal. An agent proves its
+      treasury across every wallet it holds, proves the balance was HELD
+      and not just deposited an hour ago, and carries a portable credit
+      score any app can recompute from the same public rules. The facts
+      come from the chain itself, so they cannot be faked. Only hashes of
+      the wallets are ever published; the addresses go only to the
+      verifier the agent chose, in a private package.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#demo">See the live demo</a>
         <a class="btn btn-ghost" href="#step-1">Start proving</a>
@@ -107,7 +109,10 @@
   <table class="proves-table">
     <tr><th>Claim</th><th>What proves it</th></tr>
     <tr><td>The data is genuine</td><td>The verifier re-fetches it from the chain. Onchain data cannot be typed in by the user.</td></tr>
-    <tr><td>The analysis ran correctly</td><td>NEAR AI Cloud TEE attestation, nonce-bound to the request.</td></tr>
+    <tr><td>The balance was held, not flashed</td><td>Sampled balance history at past block heights: the lowest sampled balance over the window, not a snapshot.</td></tr>
+    <tr><td>The wallets are all the prover's</td><td>Each linked wallet proves ownership with a transfer to the primary wallet — only its key holder could have signed it.</td></tr>
+    <tr><td>The credit score is real</td><td>The score is deterministic (score-v1, published rules): the verifier recomputes it from the same snapshots and the same windows. A tampered score fails verification.</td></tr>
+    <tr><td>The underwriting opinion is honest</td><td>NEAR AI Cloud TEE attestation, nonce-bound to the request. The verdict is advisory — a thin score can never support a lend, by a deterministic guard.</td></tr>
     <tr><td>The report was not altered</td><td>SHA-256 report hash anchored on NEAR; tampering fails verification.</td></tr>
     <tr><td>The wallet belongs to the prover</td><td>The prover signs a challenge with the wallet key; the publish transaction records the signer as owner.</td></tr>
     <tr><td>The wallet address stays private</td><td>Only a hash commitment is published. The address travels only in the private disclosure package to the verifier the prover chose.</td></tr>
@@ -119,20 +124,20 @@
   <h2 class="section-title">Who uses it</h2>
   <div class="use-grid">
     <div class="use-item">
-      <strong>Lending</strong>
-      <span>A borrower proves balance and clean history to a lender without handing over the wallet that holds everything.</span>
-    </div>
-    <div class="use-item">
-      <strong>Grants</strong>
-      <span>A grantee proves onchain activity and volume to a committee without doxxing the wallet behind it.</span>
-    </div>
-    <div class="use-item">
-      <strong>OTC deals</strong>
-      <span>A counterparty proves it can settle before the deal is struck — the proof, not the address, changes hands.</span>
-    </div>
-    <div class="use-item">
       <strong>Agent treasuries</strong>
-      <span>An AI agent proves its treasury health or trading performance without revealing the wallet that controls it.</span>
+      <span>An agent proves it can settle a deal — across every wallet it holds, with a sustained balance and a portable score — without publishing the treasury addresses that would invite targeting.</span>
+    </div>
+    <div class="use-item">
+      <strong>Agent-to-agent credit</strong>
+      <span>A service agent checks a client agent's score and an attested underwriting opinion before extending compute or credit — the score is recomputable, so no one has to trust the claimant.</span>
+    </div>
+    <div class="use-item">
+      <strong>Lending</strong>
+      <span>A borrower proves balance, sustained history and a clean record to a lender without handing over the wallet that holds everything.</span>
+    </div>
+    <div class="use-item">
+      <strong>Grants and OTC deals</strong>
+      <span>A grantee proves onchain activity to a committee, or a counterparty proves it can settle before a deal is struck — the proof, not the address, changes hands.</span>
     </div>
   </div>
 </section>
@@ -168,6 +173,28 @@
     <p class="muted">A bare hash is assumed to be yours; use
     <span class="mono">hash,senderId</span> for incoming transfers sent by
     someone else. Hashes that cannot be verified onchain are skipped.</p>
+    <label>Additional wallets to link (one address per line, optional)
+    <textarea id="linkedAddresses" placeholder="e.g. second-wallet.testnet"></textarea>
+    </label>
+    <p class="muted">Linking more wallets aggregates their balances, volume and
+    activity into one report — an agent's treasury is usually spread
+    across wallets. Each linked wallet proves ownership with a small
+    transfer to the primary address (below); only the key holder of
+    that wallet could have signed it.</p>
+    <label>Link transfer hash per linked wallet (one per line, same order)
+    <textarea id="linkedTxHashes" placeholder="hash of a transfer from the linked wallet to the primary address"></textarea>
+    </label>
+    <label>Balance history sampling
+    <select id="sampleWindow">
+      <option value="0" selected>No sampling — score ignores sustained balance</option>
+      <option value="6">Sample the last 6 hours (4 readings)</option>
+      <option value="24">Sample the last 24 hours (4 readings)</option>
+      <option value="168">Sample the last 7 days (4 readings)</option>
+    </select>
+    </label>
+    <p class="muted">Sampling reads the balance at past block heights, so the
+    report can prove a balance was HELD, not just deposited an hour
+    ago. The account must be older than the window you pick.</p>
     <p>
       <button id="loadDemoBtn" type="button">Load demo history</button>
       <button id="fetchSnapshotBtn" type="button">Fetch snapshot</button>
@@ -207,8 +234,27 @@
     <div class="row">
       <label>No failed txs in window (days)<input id="polNoFailed" type="text" inputmode="numeric" placeholder="30"></label>
     </div>
+    <p class="muted">Aggregate claims sum across every linked wallet (a transfer
+    between two of your own wallets is counted once). Sustained and
+    time-weighted claims need balance sampling above.</p>
+    <div class="row">
+      <label>Aggregate balance at least (NEAR)<input id="polAggBalance" type="text" inputmode="decimal" placeholder=""></label>
+      <label>Sustained balance at least (NEAR)<input id="polSustained" type="text" inputmode="decimal" placeholder=""></label>
+    </div>
+    <div class="row">
+      <label>Time-weighted balance at least (NEAR)<input id="polTimeWeighted" type="text" inputmode="decimal" placeholder=""></label>
+    </div>
+    <div class="row">
+      <label>Aggregate minimum tx count<input id="polAggMinTx" type="text" inputmode="numeric" placeholder=""></label>
+      <label>Aggregate tx window (days)<input id="polAggTxWindow" type="text" inputmode="numeric" placeholder="30"></label>
+    </div>
+    <div class="row">
+      <label>Aggregate minimum volume (NEAR)<input id="polAggMinVol" type="text" inputmode="decimal" placeholder=""></label>
+      <label>Aggregate volume window (days)<input id="polAggVolWindow" type="text" inputmode="numeric" placeholder="30"></label>
+    </div>
     <p><button id="evaluateBtn" type="button" disabled>Evaluate claims</button></p>
     <div id="claimsOut"></div>
+    <div id="scoreOut"></div>
   </section>
 
   <section class="card" id="step-4">
@@ -225,9 +271,14 @@
     </select>
     </label>
     <p>
-      <button id="aiBtn" type="button" disabled>Analyse with NEAR AI</button>
+      <button id="aiBtn" type="button" disabled>Underwrite with NEAR AI</button>
       <button id="buildReportBtn" type="button" disabled>Build report</button>
     </p>
+    <p class="muted">The underwriting judgment is advisory: NEAR AI Cloud reads the
+    deterministic score and claim facts (never your address) and gives
+    a lend / lend with limits / decline verdict with a suggested limit.
+    The score itself is the verifiable fact — any app can recompute it
+    from the disclosure package.</p>
     <p id="aiStatus" class="muted">AI analysis not run yet. The report will say "not analysed" unless you run it.</p>
     <div id="reportOut"></div>
     <p>
