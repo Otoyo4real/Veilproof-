@@ -27,9 +27,16 @@
 </head>
 <body>
 <h1>VeilProof — Verify a report</h1>
-<p>Check a VeilProof report against its onchain record. The report proves
-claims about a wallet's onchain history — for example "balance at least 1
-NEAR" — without revealing which wallet.</p>
+<p>Someone sent you a VeilProof report — a lender, a grant committee, a deal
+partner. Check it here in one click. No account, no wallet, nothing leaves
+your browser except two read-only view calls to the NEAR testnet RPC.</p>
+<p><button id="demoBtn" type="button">Try the live demo claim</button>
+<span id="demoStatus"></span></p>
+<p>The demo loads a real published claim from the demo wallet and verifies it
+against its onchain record — all seven checks should pass, including the
+AI summary. The report proves claims about a wallet's onchain history — for
+example "balance at least 5 NEAR" — without revealing which wallet to the
+public.</p>
 
 <div class="note">
 <strong>What verification proves.</strong> The report hash, evidence hash
@@ -535,7 +542,7 @@ and the only network calls are two read-only view calls
     el('certificate').hidden = false;
   }
 
-  el('verifyBtn').addEventListener('click', async function () {
+  async function runVerification() {
     var status = el('status');
     el('certificate').hidden = true;
     status.textContent = '';
@@ -592,7 +599,37 @@ and the only network calls are two read-only view calls
       status.textContent = 'Verification failed to run: ' + err.message;
       status.className = 'error';
     }
+  }
+  el('verifyBtn').addEventListener('click', runVerification);
+  el('demoBtn').addEventListener('click', async function () {
+    var demoStatus = el('demoStatus');
+    demoStatus.textContent = 'Loading the live demo claim…';
+    try {
+      var reportRes = await fetch('demo-report.json');
+      var disclosureRes = await fetch('demo-disclosure.json');
+      var policyRes = await fetch('demo-policy.json');
+      if (!reportRes.ok || !disclosureRes.ok || !policyRes.ok) {
+        throw new Error('demo files could not be loaded (HTTP ' + reportRes.status + '/' + disclosureRes.status + '/' + policyRes.status + ')');
+      }
+      var report = await reportRes.json();
+      var disclosure = await disclosureRes.json();
+      var policy = await policyRes.json();
+      el('reportId').value = report.reportId;
+      el('reportJson').value = JSON.stringify(report, null, 2);
+      el('disclosureJson').value = JSON.stringify(disclosure, null, 2);
+      el('policyJson').value = JSON.stringify(policy, null, 2);
+      demoStatus.textContent = '';
+      await runVerification();
+    } catch (err) {
+      demoStatus.textContent = 'Could not load the demo claim: ' + err.message;
+    }
   });
+  // Deep link: verify.html?report=<reportId> pre-fills the report ID.
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var linked = params.get('report');
+    if (linked) el('reportId').value = linked;
+  } catch (e) { /* ignore */ }
 })();
 </script>
 </body>

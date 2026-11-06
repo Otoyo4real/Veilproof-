@@ -1,0 +1,60 @@
+{
+  "reportId": "86f237c0cf2e3fe6",
+  "prover": "f951fcc0b515ddbee32eb992a50cbc3e9a2c08747996c5098b363990d8c6620e",
+  "createdAt": "2026-11-06T12:03:45.607Z",
+  "claims": [
+    {
+      "id": "balance_at_least",
+      "passed": true,
+      "value": "10649333866636796000000000",
+      "threshold": "5000000000000000000000000"
+    },
+    {
+      "id": "tx_count_in_window",
+      "passed": true,
+      "value": 4,
+      "threshold": 30
+    },
+    {
+      "id": "volume_in_window",
+      "passed": true,
+      "value": "1850000000000000000000000",
+      "threshold": 30
+    },
+    {
+      "id": "no_failed_txs_in_window",
+      "passed": true,
+      "value": 0,
+      "threshold": 30
+    }
+  ],
+  "policyVersion": "veilproof-policy-v1",
+  "aiSummary": {
+    "provider": "near-ai",
+    "model": "z-ai/glm-5.3-flash",
+    "verdict": "consistent",
+    "points": [
+      "balance_at_least passed=true is consistent: balanceYocto 10649333866636796000000000 is at or above the threshold 5000000000000000000000000, and the claim value matches the metric.",
+      "tx_count_in_window passed=true is consistent: claim value 4 matches txCount 4, the 30-day window matches txWindowDays, and a nonzero transaction count supports a passing claim.",
+      "volume_in_window passed=true is consistent: claim value matches volumeYocto, the 30-day window matches volumeWindowDays, and positive volume supports a passing claim.",
+      "no_failed_txs_in_window passed=true is consistent: failedTxCount is 0 as required, and the 30-day window matches noFailedWindowDays.",
+      "Internal metric coherence holds: successTxCount 4 plus failedTxCount 0 equals txCount 4, and all metrics needed to check the claims are present."
+    ],
+    "attestation": {
+      "verifiable": true,
+      "nonceMatched": true,
+      "ref": "0aac1ff60584ca100f0e26a4714e8b0e4de659d8b4d0144fb7861239ebf77665"
+    }
+  },
+  "evidenceRefs": {
+    "attestationRef": "0aac1ff60584ca100f0e26a4714e8b0e4de659d8b4d0144fb7861239ebf77665",
+    "dataHash": "277b11a9224e20956c1a67b7e2d310bbbbb77738bab098d59a7457dc75e17b00"
+  },
+  "expiresAt": "1796558625000000000",
+  "disclosed": [
+    "balance_at_least",
+    "tx_count_in_window",
+    "volume_in_window",
+    "no_failed_txs_in_window"
+  ]
+}

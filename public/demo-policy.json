@@ -1,0 +1,8 @@
+{
+  "balanceAtLeastYocto": "5000000000000000000000000",
+  "minTxCount": 3,
+  "txWindowDays": 30,
+  "minVolumeYocto": "1000000000000000000000000",
+  "volumeWindowDays": 30,
+  "noFailedWindowDays": 30
+}

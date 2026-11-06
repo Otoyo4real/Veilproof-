@@ -3,6 +3,11 @@
 Prove financial claims about a wallet (volume, balance, history) without revealing
 which wallet — because revealing it would expose everything.
 
+Live site: https://veilproof22.vercel.app/ — the deployment with the NEAR AI
+key configured, so the AI analysis runs live. (The older
+veilproof-delta.vercel.app deployment has no key configured, so its AI says
+"not analysed".)
+
 ## The idea
 
 A trader or business proves claims like "this wallet did over $1M volume in 30 days"
@@ -26,6 +31,23 @@ claims about onchain data. The backend fetches chain data for the analysis — t
 fetch is auditable (the report records the block height and data hash, and the
 verifier can re-fetch the same data once the address is disclosed to them).
 
+## What stays private — and from whom (the honest trade-off)
+
+VeilProof is a **hybrid** privacy model, and it owns that plainly:
+
+| Party | Sees |
+| --- | --- |
+| The public | Only hashes — the report hash, evidence hash and policy hash on NEAR, and a hash commitment of the address. Never the address, never the amounts, never the tx hashes. A tripwire in the report builder enforces this. |
+| The chosen verifier | The address and the data — because they must re-fetch the chain and re-run the checks themselves. That is the point: verification is real, not a trust-me. The prover chooses exactly which verifier gets the disclosure package. |
+| The AI backend | Claim-level aggregates only (balances, counts, volume, windows) — never the address, never the tx hashes. The analysis prompt is sanitised by an allowlist, and any address-like field is rejected before it reaches the model. |
+
+What VeilProof does **not** do: hide the address from the verifier, or hide
+it from the prover's own browser. A design where even the verifier never
+learns the address would need pure zero-knowledge proving; this project chose
+the hybrid on purpose, because a lender who cannot re-check the chain is a
+lender who has to trust the proof system instead — and that trust is exactly
+what the disclosure model removes.
+
 ## Separation rules (hard rules from the owner)
 
 - **Wallets:** fresh VeilProof testnet accounts only. Genesis wallets
@@ -37,8 +59,28 @@ verifier can re-fetch the same data once the address is disclosed to them).
 
 ## Status
 
-Scaffolding in progress. Hackathon: NEAR Hackathon 2026 (Build Beyond Boundaries),
-track: Privacy & Private AI. Deadline: 14 Nov 2026 23:59 UTC. Testnet only.
+Built and live. Registry deployed on NEAR testnet, a demo claim published and
+verified onchain (report `86f237c0cf2e3fe6`, publish tx
+`B33bZZ6HU6Y1hzi6i7DgUuxwm1jFPt7tXdaPDcUCiECW`), 77/77 tests green, and the
+live site runs the AI analysis with a real attested summary. Hackathon: NEAR
+Hackathon 2026 (Build Beyond Boundaries), track: Privacy & Private AI.
+Deadline: 14 Nov 2026 23:59 UTC. Testnet only.
+
+## Judge in 10 minutes
+
+1. Open https://veilproof22.vercel.app/verify.html and press
+   **Try the live demo claim** — a real published claim is verified against
+   its onchain record. You should see VALID and all seven checks passing,
+   including the AI summary.
+2. On the main page, build a report for the demo wallet yourself and press
+   **Analyse** — the AI summary comes back attested (verifiable, nonce
+   matched).
+3. Publish the report (demo wallet, testnet) and verify it the same way.
+   Then paste a tampered report — the hash checks fail. Revoke it — the
+   validity check fails.
+
+Do X, see Y. Nothing is faked: every check above runs against the live
+testnet registry, and a failed check says so.
 
 ## Layout
 
