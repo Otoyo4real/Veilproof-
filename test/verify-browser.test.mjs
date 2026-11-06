@@ -115,6 +115,31 @@ test('browser verify module agrees with the Node module on every fixture', async
     nowNs: g.nowNs,
   };
   const cases = { happy: base };
+  // P2: a salted report must verify identically on both paths, and a
+  // wrong salt must fail identically on both paths.
+  const salt = (await import('../src/report.js')).newProverSalt();
+  const saltedHash = (await import('../src/report.js')).saltedAddressHash(salt, ADDRESS);
+  const saltedSnap = snapshot();
+  const saltedReport = buildReport({
+    proverAddressHash: saltedHash,
+    claims: evaluateClaims(saltedSnap, POLICY, NOW_NS).claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: saltedSnap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+  });
+  const saltedBase = {
+    report: saltedReport,
+    onchainRecord: onchainRecordFor(saltedReport),
+    disclosurePackage: buildDisclosurePackage(saltedReport, ADDRESS, saltedSnap, salt),
+    policy: POLICY,
+    nowNs: NOW_NS,
+  };
+  cases.salted = saltedBase;
+  cases.saltedWrongSalt = {
+    ...saltedBase,
+    disclosurePackage: { ...saltedBase.disclosurePackage, salt: (await import('../src/report.js')).newProverSalt() },
+  };
   const tampered = JSON.parse(JSON.stringify(g.report));
   tampered.claims[0].value = '1';
   cases.tampered = { ...base, report: tampered };
@@ -148,6 +173,8 @@ test('browser verify module agrees with the Node module on every fixture', async
     );
   }
   assert.equal(nodeVerifyReport(base).valid, true);
+  assert.equal(nodeVerifyReport(saltedBase).valid, true);
+  assert.equal(nodeVerifyReport(cases.saltedWrongSalt).valid, false);
 });
 
 test('browser verify module throws on malformed input, like the Node module', async () => {

@@ -30,7 +30,7 @@
 
 import { evaluateClaims } from './js/claims-engine.js';
 import { computeScore } from './js/score.js';
-import { buildReport, reportHash, evidenceHash, policyHash } from './js/report.js';
+import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, commitAddress } from './js/report.js';
 import { buildDisclosurePackage, buildMultiDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
 import { fetchAccountSnapshot, dataHashForSnapshots } from './js/onchain.js';
 import { sha256Hex, randomHex } from './js/crypto.js';
@@ -818,9 +818,17 @@ async function buildReportAndHashes() {
     );
     const days = Number($('expirySelect').value);
     const expiresAt = computeExpiresAt(days);
-    const proverAddressHash = await sha256Hex(state.previewAddress);
+    // P2 unlinkability: a fresh random salt per report (and per linked
+    // wallet), so two reports from the same treasury get different
+    // commitments and cannot be matched from public data. The salts
+    // travel only inside the disclosure package, never in the report.
+    const proverSalt = newProverSalt();
+    const proverAddressHash = await commitAddress(state.previewAddress, proverSalt);
+    const linkedSalts = state.linkedWallets.map(() => newProverSalt());
     const linkedProverHashes = [];
-    for (const w of state.linkedWallets) linkedProverHashes.push(await sha256Hex(w.address));
+    for (let i = 0; i < state.linkedWallets.length; i += 1) {
+      linkedProverHashes.push(await commitAddress(state.linkedWallets[i].address, linkedSalts[i]));
+    }
     // The evidence data hash covers every wallet in the bundle (and
     // any balance samples); the single-wallet hash is only used when
     // there is one wallet and no samples.
@@ -836,15 +844,23 @@ async function buildReportAndHashes() {
       linkedProverHashes,
       score: state.score,
     });
-    // Tripwire: the public report must not contain any raw address or
-    // any transaction hash. If it ever did, refuse to show or publish it.
+    // Tripwire: the public report must not contain any raw address, any
+    // transaction hash, or any prover salt. If it ever did, refuse to
+    // show or publish it.
     const allAddresses = [state.previewAddress, ...state.linkedWallets.map((w) => w.address)];
     const allTxHashes = [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)].flatMap((s) => s.txs.map((t) => t.hash));
-    for (const addr of allAddresses) assertPublicReportClean(report, addr, allTxHashes);
+    const allSalts = [proverSalt, ...linkedSalts];
+    for (const addr of allAddresses) assertPublicReportClean(report, addr, allTxHashes, allSalts);
     const disclosurePackage =
       state.linkedWallets.length > 0
-        ? await buildMultiDisclosurePackage(report, state.previewAddress, state.snapshot, state.linkedWallets)
-        : await buildDisclosurePackage(report, state.previewAddress, state.snapshot);
+        ? await buildMultiDisclosurePackage(
+            report,
+            state.previewAddress,
+            state.snapshot,
+            state.linkedWallets.map((w, i) => ({ ...w, salt: linkedSalts[i] })),
+            proverSalt,
+          )
+        : await buildDisclosurePackage(report, state.previewAddress, state.snapshot, proverSalt);
     const hashes = {
       report_hash: await reportHash(report),
       evidence_hash: await evidenceHash(report.evidenceRefs),
@@ -856,7 +872,7 @@ async function buildReportAndHashes() {
     out.innerHTML =
       '<p class="ok">Report built. Clean check passed — the report contains no address and no transaction hash.</p>' +
       '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
-      '<p>Prover commitment (SHA-256 of the address — the address itself is never shown):<br><span class="mono">' +
+      '<p>Prover commitment (salted SHA-256 of the address — fresh salt per report, so two reports from the same treasury cannot be matched; the address itself is never shown):<br><span class="mono">' +
       esc(report.prover) + '</span></p>' +
       (report.linkedProvers.length > 0 ? '<p>Linked wallets: ' + report.linkedProvers.length + ' (commitments only).</p>' : '') +
       (report.score

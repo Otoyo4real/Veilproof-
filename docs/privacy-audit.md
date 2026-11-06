@@ -60,7 +60,20 @@ What each leak means:
   plus a signature-based revoke) would be needed to remove it, and
   is future work.
 
-## Results — AFTER (to be filled when P2/P3 land)
+## Results — AFTER P2 (salts), BEFORE P3 (2026-11-06)
+
+P2 fixed the commitment leaks. The exact-value leaks remain until P3.
+
+| Attack | Result | Chance / baseline | Verdict |
+| --- | --- | --- | --- |
+| (a) Address recovery (dictionary) | 0/50 recovered — 0/45 random, 0/5 named | — | PASS |
+| (b) Linking via prover commitment | no clusters at all (every report has a unique commitment) | chance 1.0% | PASS |
+| (b) Linking via registry owner field | precision 100.0% | chance 1.0% | LEAK (documented limit) |
+| (c) Balance estimate error (mean) | 0.00% | exact = 0% | LEAK — P3 |
+| (c) Score estimate error (mean) | 0.00% | exact = 0% | LEAK — P3 |
+| Live demo claim `a41d9faaa0a19148` | dictionary recovery YES, exact balance visible YES, exact score visible YES (770) | — | LEAK — old pre-P2 report; P3 republishes it |
+
+## Results — AFTER (to be filled when P3 lands)
 
 | Attack | Result | Chance / baseline | Verdict |
 | --- | --- | --- | --- |

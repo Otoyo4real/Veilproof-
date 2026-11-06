@@ -262,3 +262,52 @@ test('null AI summary is allowed and never auto-filled', () => {
   // The report carries no analysis text anywhere.
   assert.equal(JSON.stringify(omitted).includes('analys'), false);
 });
+
+// P2 unlinkability: salted commitments.
+test('salt helpers: newProverSalt is 32 hex chars, salted hash is deterministic and differs per salt', async () => {
+  const { newProverSalt, saltedAddressHash, commitAddress } = await import('../src/report.js');
+  const salt = newProverSalt();
+  assert.match(salt, /^[0-9a-f]{32}$/);
+  assert.notEqual(newProverSalt(), salt);
+  const h1 = saltedAddressHash(salt, ADDRESS);
+  assert.equal(h1, saltedAddressHash(salt, ADDRESS));
+  assert.match(h1, /^[0-9a-f]{64}$/);
+  // A different salt gives a different commitment for the same address.
+  assert.notEqual(saltedAddressHash(newProverSalt(), ADDRESS), h1);
+  // Salted differs from the legacy plain hash.
+  assert.notEqual(h1, sha256Hex(ADDRESS));
+  // commitAddress without a salt is the legacy plain hash.
+  assert.equal(commitAddress(ADDRESS), sha256Hex(ADDRESS));
+  assert.equal(commitAddress(ADDRESS, salt), h1);
+  // Bad salts and addresses are rejected.
+  assert.throws(() => saltedAddressHash('xyz', ADDRESS), /salt must be 32/);
+  assert.throws(() => saltedAddressHash('0'.repeat(31), ADDRESS), /salt must be 32/);
+  assert.throws(() => saltedAddressHash(salt, ''), /address must be a non-empty string/);
+});
+
+test('disclosure with salt: package carries the salt, wrong salt refuses, tripwire catches a leaked salt', async () => {
+  const { newProverSalt, saltedAddressHash } = await import('../src/report.js');
+  const { buildDisclosurePackage, assertPublicReportClean } = await import('../src/disclosure.js');
+  const salt = newProverSalt();
+  const snap = snapshot();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: saltedAddressHash(salt, ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+  });
+  const pkg = buildDisclosurePackage(report, ADDRESS, snap, salt);
+  assert.equal(pkg.salt, salt);
+  assert.equal(pkg.address, ADDRESS);
+  // A wrong salt does not bind to this report.
+  assert.throws(() => buildDisclosurePackage(report, ADDRESS, snap, newProverSalt()), /does not hash to report.prover/);
+  // The legacy (unsalted) package does not bind to a salted report.
+  assert.throws(() => buildDisclosurePackage(report, ADDRESS, snap), /does not hash to report.prover/);
+  // The tripwire refuses a report that contains a salt.
+  const leaked = { ...report, note: salt };
+  assert.throws(() => assertPublicReportClean(leaked, ADDRESS, [], salt), /leaks a prover salt/);
+  assert.equal(assertPublicReportClean(report, ADDRESS, snap.txs.map((t) => t.hash), salt), true);
+});

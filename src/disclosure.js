@@ -18,12 +18,30 @@
 
 import { createHash } from 'node:crypto';
 import { canonicalJson } from './canonical.js';
+import { saltedAddressHash } from './report.js';
 import { buildLinkMessage, verifyLinkSignature } from './nep413.js';
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+const SALT_HEX = /^[0-9a-f]{32}$/;
 
 function sha256Hex(str) {
   return createHash('sha256').update(str, 'utf8').digest('hex');
+}
+
+// The commitment a disclosure address must match. With a salt (P2)
+// it is the salted commitment; without one it is the legacy plain
+// sha256(address) of pre-P2 reports. The salt travels only in the
+// disclosure package, never in the public report.
+function addressMatchesCommitment(address, salt, commitment) {
+  if (salt === undefined || salt === null) return sha256Hex(address) === commitment;
+  return saltedAddressHash(salt, address) === commitment;
+}
+
+function requireSalt(salt, label) {
+  if (typeof salt !== 'string' || !SALT_HEX.test(salt)) {
+    throw new Error(`disclosure: ${label} must be 32 lowercase hex chars (16 random bytes)`);
+  }
+  return salt;
 }
 
 function requireSnapshot(snapshot) {
@@ -45,7 +63,11 @@ function requireSnapshot(snapshot) {
 // Assemble the private disclosure package for one chosen verifier.
 // The snapshot is deep-copied so later mutation of the caller's
 // snapshot cannot silently change what was disclosed.
-export function buildDisclosurePackage(report, address, snapshot) {
+// salt (optional, P2): the fresh per-report salt. When given, the
+// package carries it and the binding check is the salted commitment;
+// when omitted, the legacy plain sha256(address) check applies (old
+// reports keep working).
+export function buildDisclosurePackage(report, address, snapshot, salt) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) {
     throw new Error('buildDisclosurePackage: report must be an object');
   }
@@ -56,15 +78,18 @@ export function buildDisclosurePackage(report, address, snapshot) {
     throw new Error('buildDisclosurePackage: address must be a non-empty string');
   }
   requireSnapshot(snapshot);
-  if (sha256Hex(address) !== report.prover) {
+  if (salt !== undefined && salt !== null) requireSalt(salt, 'salt');
+  if (!addressMatchesCommitment(address, salt, report.prover)) {
     throw new Error('buildDisclosurePackage: address does not hash to report.prover');
   }
-  return {
+  const pkg = {
     address,
     dataHash: snapshot.dataHash,
     reportId: report.reportId,
     snapshot: JSON.parse(JSON.stringify(snapshot)),
   };
+  if (salt !== undefined && salt !== null) pkg.salt = salt;
+  return pkg;
 }
 
 // Assemble the private disclosure package for a multi-wallet report.
@@ -83,8 +108,12 @@ export function buildDisclosurePackage(report, address, snapshot) {
 //   binding of its public key to the linked account is checked by
 //   the verifier via the chain's access key list (linkKeyBindings).
 // Each linked address must hash to an entry in report.linkedProvers.
-export function buildMultiDisclosurePackage(report, address, snapshot, linked = []) {
-  const base = buildDisclosurePackage(report, address, snapshot);
+// salt (optional, P2): the primary wallet's fresh per-report salt,
+// passed through to buildDisclosurePackage. Each linked entry may
+// carry its own `salt` (fresh per linked wallet per report); the
+// entry's binding check is salted when present, legacy plain when not.
+export function buildMultiDisclosurePackage(report, address, snapshot, linked = [], salt) {
+  const base = buildDisclosurePackage(report, address, snapshot, salt);
   if (!Array.isArray(linked)) {
     throw new Error('buildMultiDisclosurePackage: linked must be an array');
   }
@@ -97,7 +126,8 @@ export function buildMultiDisclosurePackage(report, address, snapshot, linked = 
       throw new Error(`buildMultiDisclosurePackage: linked[${i}].address must be a non-empty string`);
     }
     requireSnapshot(entry.snapshot);
-    if (sha256Hex(entry.address) !== linkedProvers[i]) {
+    const entrySalt = entry.salt === undefined || entry.salt === null ? undefined : requireSalt(entry.salt, `linked[${i}].salt`);
+    if (!addressMatchesCommitment(entry.address, entrySalt, linkedProvers[i])) {
       throw new Error(`buildMultiDisclosurePackage: linked[${i}].address does not hash to report.linkedProvers[${i}]`);
     }
     const hasTx = typeof entry.linkTxHash === 'string' && entry.linkTxHash.length > 0;
@@ -112,11 +142,13 @@ export function buildMultiDisclosurePackage(report, address, snapshot, linked = 
           `buildMultiDisclosurePackage: linked[${i}].linkTxHash is not a successful transfer from the linked wallet to the primary address`,
         );
       }
-      return {
+      const out = {
         address: entry.address,
         linkTxHash: entry.linkTxHash,
         snapshot: JSON.parse(JSON.stringify(entry.snapshot)),
       };
+      if (entrySalt !== undefined) out.salt = entrySalt;
+      return out;
     }
     const sig = entry.linkSignature;
     if (!sig || typeof sig !== 'object') {
@@ -133,11 +165,13 @@ export function buildMultiDisclosurePackage(report, address, snapshot, linked = 
     if (!verifyLinkSignature(sig)) {
       throw new Error(`buildMultiDisclosurePackage: linked[${i}].linkSignature does not verify`);
     }
-    return {
+    const out = {
       address: entry.address,
       linkSignature: { ...sig },
       snapshot: JSON.parse(JSON.stringify(entry.snapshot)),
     };
+    if (entrySalt !== undefined) out.salt = entrySalt;
+    return out;
   });
   return { ...base, linked: entries };
 }
@@ -146,7 +180,10 @@ export function buildMultiDisclosurePackage(report, address, snapshot, linked = 
 // or any of the given transaction hashes. Pass the address and the
 // snapshot's tx hashes (as strings). The prover commitment (a hash)
 // is SUPPOSED to be in the report and is not checked.
-export function assertPublicReportClean(report, address, txHashes) {
+// salts (optional, P2): the per-report salt(s) — a string or an array.
+// A salt must never appear in the public report either; if it does,
+// the report is linkable by dictionary attack again, so refuse it.
+export function assertPublicReportClean(report, address, txHashes, salts) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) {
     throw new Error('assertPublicReportClean: report must be an object');
   }
@@ -163,6 +200,13 @@ export function assertPublicReportClean(report, address, txHashes) {
     if (typeof hash !== 'string' || hash.length === 0) continue;
     if (json.includes(hash)) {
       throw new Error(`assertPublicReportClean: report leaks transaction hash ${hash}`);
+    }
+  }
+  const saltList = salts === undefined || salts === null ? [] : Array.isArray(salts) ? salts : [salts];
+  for (const salt of saltList) {
+    if (typeof salt !== 'string' || salt.length === 0) continue;
+    if (json.includes(salt)) {
+      throw new Error('assertPublicReportClean: report leaks a prover salt');
     }
   }
   return true;

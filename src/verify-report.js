@@ -65,7 +65,7 @@ import { createHash } from 'node:crypto';
 import { evaluateClaims } from './claims-engine.js';
 import { dataHashForSnapshots } from './onchain.js';
 import { computeScore } from './score.js';
-import { reportHash, evidenceHash, policyHash } from './report.js';
+import { reportHash, evidenceHash, policyHash, saltedAddressHash } from './report.js';
 import { buildLinkMessage, verifyLinkSignature } from './nep413.js';
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -108,18 +108,29 @@ export function verifyReport({ report, onchainRecord, disclosurePackage, policy,
   }
   const bundle = { wallets: snapshots };
 
-  // 0. The disclosure package belongs to this report.
+  // 0. The disclosure package belongs to this report. With a salt
+  // (P2) the binding is the salted commitment; without one it is the
+  // legacy plain sha256(address) of pre-P2 reports. The salt travels
+  // only in the disclosure package, so a salted report stays
+  // unlinkable from public data.
+  const addressMatchesCommitment = (address, salt, commitment) => {
+    if (salt === undefined || salt === null) return sha256Hex(address) === commitment;
+    if (typeof salt !== 'string' || !/^[0-9a-f]{32}$/.test(salt)) return false;
+    return saltedAddressHash(salt, address) === commitment;
+  };
   if (typeof disclosurePackage.address !== 'string' || disclosurePackage.address.length === 0) {
     check('prover_binding', false, 'Disclosure package has no address.');
   } else if (typeof report.prover !== 'string' || report.prover.length === 0) {
     check('prover_binding', false, 'Report has no prover commitment.');
-  } else if (sha256Hex(disclosurePackage.address) !== report.prover) {
+  } else if (!addressMatchesCommitment(disclosurePackage.address, disclosurePackage.salt, report.prover)) {
     check('prover_binding', false, 'Disclosure address does not hash to the report prover commitment.');
   } else if (linked.length > 0) {
     const linkedProvers = Array.isArray(report.linkedProvers) ? report.linkedProvers : [];
     const bad = linked.findIndex(
       (entry, i) =>
-        typeof entry?.address !== 'string' || entry.address.length === 0 || sha256Hex(entry.address) !== linkedProvers[i],
+        typeof entry?.address !== 'string' ||
+        entry.address.length === 0 ||
+        !addressMatchesCommitment(entry.address, entry.salt, linkedProvers[i]),
     );
     if (bad >= 0) {
       check('prover_binding', false, `Linked wallet ${bad} does not hash to the report linked-prover commitment.`);

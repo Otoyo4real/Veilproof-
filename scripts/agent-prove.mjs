@@ -67,7 +67,7 @@ import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import { sanitiseClaims, sanitiseMetrics } from '../src/ai-analysis.js';
 import { canonicalJson } from '../src/canonical.js';
-import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
+import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, commitAddress } from '../src/report.js';
 import { buildMultiDisclosurePackage, assertPublicReportClean } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
 import { base58Decode, base58Encode, signLinkMessage } from '../src/nep413.js';
@@ -381,8 +381,12 @@ async function main() {
   }
 
   console.log('[5/6] Build report + disclosure package');
-  const proverAddressHash = createHash('sha256').update(primaryAccountId, 'utf8').digest('hex');
-  const linkedProverHashes = linkedKeys.map((lk) => createHash('sha256').update(lk.accountId, 'utf8').digest('hex'));
+  // P2 unlinkability: a fresh random salt per report (and per linked
+  // wallet). The salts travel only inside the disclosure package.
+  const proverSalt = newProverSalt();
+  const linkedSalts = linkedKeys.map(() => newProverSalt());
+  const proverAddressHash = commitAddress(primaryAccountId, proverSalt);
+  const linkedProverHashes = linkedKeys.map((lk, i) => commitAddress(lk.accountId, linkedSalts[i]));
   const expiresAt = computeExpiresAt(args.expiryDays);
   const multiDataHash = await dataHashForSnapshots(snapshots);
   const report = buildReport({
@@ -395,15 +399,16 @@ async function main() {
     linkedProverHashes,
     score,
   });
-  assertPublicReportClean(report, primaryAccountId, primary.txs.map((t) => t.hash));
+  assertPublicReportClean(report, primaryAccountId, primary.txs.map((t) => t.hash), [proverSalt, ...linkedSalts]);
   for (let i = 0; i < linkedSnapshots.length; i += 1) {
-    assertPublicReportClean(report, linkedKeys[i].accountId, linkedSnapshots[i].txs.map((t) => t.hash));
+    assertPublicReportClean(report, linkedKeys[i].accountId, linkedSnapshots[i].txs.map((t) => t.hash), [proverSalt, ...linkedSalts]);
   }
   const disclosurePackage = buildMultiDisclosurePackage(
     report,
     primaryAccountId,
     primary,
-    linkedKeys.map((lk, i) => ({ address: lk.accountId, snapshot: linkedSnapshots[i], linkSignature: linkSignatures[lk.accountId] })),
+    linkedKeys.map((lk, i) => ({ address: lk.accountId, snapshot: linkedSnapshots[i], linkSignature: linkSignatures[lk.accountId], salt: linkedSalts[i] })),
+    proverSalt,
   );
   const hashes = {
     report_hash: reportHash(report),

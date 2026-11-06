@@ -31,7 +31,7 @@ import { createHash } from 'node:crypto';
 import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import { computeDataHash } from '../src/onchain.js';
-import { buildReport } from '../src/report.js';
+import { buildReport, newProverSalt, saltedAddressHash } from '../src/report.js';
 
 const NEAR = 10n ** 24n;
 const NOW_NS = 1793961600000000000n;
@@ -150,8 +150,13 @@ function makeReport(rng, address, balanceNear) {
   const snap = makeSnapshot(rng, address, balanceNear);
   const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
   const score = computeScore(snap, SCORE_OPTS, NOW_NS.toString(), 'score-v2');
+  // P2: a fresh random salt per report. The attacker never sees the
+  // salt (it travels only in the disclosure package, which the audit
+  // does not give it), so dictionary hashing cannot recover the address
+  // and two reports from the same prover get different commitments.
+  const salt = newProverSalt();
   const report = buildReport({
-    proverAddressHash: sha256Hex(address),
+    proverAddressHash: saltedAddressHash(salt, address),
     claims,
     policyVersion: POLICY_VERSION,
     aiSummary: null,
@@ -159,7 +164,7 @@ function makeReport(rng, address, balanceNear) {
     expiresAt: EXPIRES_AT,
     score,
   });
-  return { address, snapshot: snap, report, score, aggregateBalance: BigInt(snap.account.amount) };
+  return { address, salt, snapshot: snap, report, score, aggregateBalance: BigInt(snap.account.amount) };
 }
 
 // Simulated registry: the attacker's only view is get_claim (which

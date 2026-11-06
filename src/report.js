@@ -38,6 +38,41 @@ function sha256Hex(str) {
   return createHash('sha256').update(str, 'utf8').digest('hex');
 }
 
+// P2 unlinkability: a fresh random salt per report, so two reports
+// from the same treasury get different commitments and cannot be
+// matched from public data.
+//
+// - newProverSalt(): 16 random bytes, hex-encoded (32 chars).
+// - saltedAddressHash(salt, address): SHA-256 over the UTF-8 bytes of
+//   (salt hex + address). The salt NEVER appears in the public report
+//   or onchain — it travels only inside the private disclosure package,
+//   so a dictionary attacker cannot precompute the hash without it.
+// - commitAddress(address, salt): salted when a salt is given, plain
+//   sha256(address) when omitted. The plain form is the legacy
+//   commitment of reports published before P2; the verifier still
+//   accepts it (fallback in verify-report.js) so old reports keep
+//   verifying.
+export function newProverSalt() {
+  return randomBytes(16).toString('hex');
+}
+
+const SALT_HEX = /^[0-9a-f]{32}$/;
+
+export function saltedAddressHash(salt, address) {
+  if (typeof salt !== 'string' || !SALT_HEX.test(salt)) {
+    throw new Error('saltedAddressHash: salt must be 32 lowercase hex chars (16 random bytes)');
+  }
+  if (typeof address !== 'string' || address.length === 0) {
+    throw new Error('saltedAddressHash: address must be a non-empty string');
+  }
+  return sha256Hex(salt + address);
+}
+
+export function commitAddress(address, salt) {
+  if (salt === undefined || salt === null) return sha256Hex(address);
+  return saltedAddressHash(salt, address);
+}
+
 function requireHexHash(value, label) {
   if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
     throw new Error(`report: ${label} must be a 64-char lowercase hex SHA-256, got ${JSON.stringify(value)}`);
@@ -108,8 +143,13 @@ export function policyHash(policyVersion, policy) {
 }
 
 // Build the public report.
-// - proverAddressHash: SHA-256 hex of the prover's address. The address
-//   itself must never appear in the report.
+// - proverAddressHash: SHA-256 hex commitment of the prover's address.
+//   Since P2 this is normally the SALTED commitment
+//   (saltedAddressHash(salt, address), salt fresh per report, salt
+//   carried only in the disclosure package) — two reports from the
+//   same treasury then have different commitments and cannot be
+//   matched from public data. The plain sha256(address) form is the
+//   legacy commitment of pre-P2 reports; the verifier still accepts it.
 // - claims: the evaluated claims (from evaluateClaims). Only the ids
 //   listed in disclosedFields are included; the rest are withheld.
 //   disclosedFields omitted means "disclose everything evaluated".

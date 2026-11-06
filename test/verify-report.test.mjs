@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import { computeDataHash, dataHashForSnapshots } from '../src/onchain.js';
-import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
+import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, saltedAddressHash } from '../src/report.js';
 import { buildDisclosurePackage, buildMultiDisclosurePackage } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
 import { signLinkMessage, buildLinkMessage, base58Encode } from '../src/nep413.js';
@@ -327,6 +327,20 @@ test('parity: page copy agrees with the Node module', async () => {
   expired.expiresAt = (NOW_NS - 1n * DAY_NS).toString();
   cases.expired = { ...base, report: expired, onchainRecord: onchainRecordFor(expired, { valid: true }) };
   cases.timeShift = { ...base, nowNs: NOW_NS + 60n * DAY_NS };
+  // P2: a salted report and a wrong-salt report must agree too.
+  const salted = saltedGenuine();
+  const saltedBase = {
+    report: salted.report,
+    onchainRecord: salted.onchainRecord,
+    disclosurePackage: salted.disclosurePackage,
+    policy: salted.policy,
+    nowNs: salted.nowNs,
+  };
+  cases.salted = saltedBase;
+  cases.saltedWrongSalt = {
+    ...saltedBase,
+    disclosurePackage: { ...saltedBase.disclosurePackage, salt: newProverSalt() },
+  };
   // Malformed snapshot: the claims re-run throws, and the detail must
   // carry the engine's exact message in both implementations.
   const badSnap = JSON.parse(JSON.stringify(g.snapshot));
@@ -574,4 +588,102 @@ test('verify old reports: no score and no linked wallets still verify', () => {
   assert.equal(result.valid, true);
   assert.equal(checkByName(result, 'score').passed, true);
   assert.equal(checkByName(result, 'link_proofs').passed, true);
+});
+
+// P2 unlinkability: salted commitments verify, legacy ones still verify,
+// and a wrong salt fails the binding.
+function saltedGenuine() {
+  const salt = newProverSalt();
+  const snap = snapshot();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: saltedAddressHash(salt, ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+  });
+  return {
+    salt,
+    address: ADDRESS,
+    snapshot: snap,
+    report,
+    onchainRecord: onchainRecordFor(report),
+    disclosurePackage: buildDisclosurePackage(report, ADDRESS, snap, salt),
+    policy: POLICY,
+    nowNs: NOW_NS,
+  };
+}
+
+test('verify salted: a fresh-salt report verifies valid, all 9 checks pass', () => {
+  const g = saltedGenuine();
+  const result = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(result.valid, true);
+  assert.ok(result.checks.every((c) => c.passed));
+  assert.equal(checkByName(result, 'prover_binding').passed, true);
+});
+
+test('verify salted: two reports from the same address have different commitments', () => {
+  const a = saltedGenuine();
+  const b = saltedGenuine();
+  assert.notEqual(a.report.prover, b.report.prover);
+  assert.notEqual(a.salt, b.salt);
+  // Both still verify against their own disclosure packages.
+  for (const g of [a, b]) {
+    const result = verifyReport({
+      report: g.report,
+      onchainRecord: g.onchainRecord,
+      disclosurePackage: g.disclosurePackage,
+      policy: g.policy,
+      nowNs: g.nowNs,
+    });
+    assert.equal(result.valid, true);
+  }
+});
+
+test('verify salted: a wrong salt fails prover_binding, a missing salt fails a salted report', () => {
+  const g = saltedGenuine();
+  const wrongSalt = newProverSalt();
+  const wrongPkg = { ...g.disclosurePackage, salt: wrongSalt };
+  const wrongResult = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: wrongPkg,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(wrongResult.valid, false);
+  assert.equal(checkByName(wrongResult, 'prover_binding').passed, false);
+  // No salt at all: the verifier falls back to the legacy plain hash,
+  // which does not match a salted commitment.
+  const { salt: _dropped, ...noSaltPkg } = g.disclosurePackage;
+  const noSaltResult = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: noSaltPkg,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(noSaltResult.valid, false);
+  assert.equal(checkByName(noSaltResult, 'prover_binding').passed, false);
+});
+
+test('verify legacy: an unsalted (pre-P2) report still verifies valid', () => {
+  const g = genuine();
+  const result = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(result.valid, true);
+  assert.equal(checkByName(result, 'prover_binding').passed, true);
 });

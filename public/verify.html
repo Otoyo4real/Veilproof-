@@ -243,6 +243,21 @@ touched the chain. A report with no AI summary means "not analysed", not
     return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
   }
 
+  // P2 unlinkability — inline mirror of src/report.js saltedAddressHash.
+  // Salted commitment: SHA-256 over (salt hex + address). The salt
+  // travels only in the disclosure package, never in the public report.
+  async function saltedAddressHash(salt, address) {
+    if (typeof salt !== 'string' || !/^[0-9a-f]{32}$/.test(salt)) return null;
+    if (typeof address !== 'string' || address.length === 0) return null;
+    return sha256Hex(salt + address);
+  }
+
+  async function addressMatchesCommitment(address, salt, commitment) {
+    if (salt === undefined || salt === null) return (await sha256Hex(address)) === commitment;
+    var h = await saltedAddressHash(salt, address);
+    return h !== null && h === commitment;
+  }
+
   function hashedPayload(report) {
     var payload = {};
     for (var k in report) {
@@ -750,15 +765,17 @@ touched the chain. A report with no AI summary means "not analysed", not
       check('prover_binding', false, 'Disclosure package has no address.');
     } else if (typeof report.prover !== 'string' || report.prover.length === 0) {
       check('prover_binding', false, 'Report has no prover commitment.');
-    } else if ((await sha256Hex(disclosurePackage.address)) !== report.prover) {
+    } else if (!(await addressMatchesCommitment(disclosurePackage.address, disclosurePackage.salt, report.prover))) {
       check('prover_binding', false, 'Disclosure address does not hash to the report prover commitment.');
     } else if (linked.length > 0) {
       var linkedProvers = Array.isArray(report.linkedProvers) ? report.linkedProvers : [];
       var badLink = -1;
       for (var bi = 0; bi < linked.length; bi++) {
         var entryAddr = linked[bi] && linked[bi].address;
-        var entryHash = typeof entryAddr === 'string' && entryAddr.length > 0 ? await sha256Hex(entryAddr) : null;
-        if (entryHash === null || entryHash !== linkedProvers[bi]) { badLink = bi; break; }
+        var entryOk = typeof entryAddr === 'string' && entryAddr.length > 0
+          ? await addressMatchesCommitment(entryAddr, linked[bi].salt, linkedProvers[bi])
+          : false;
+        if (!entryOk) { badLink = bi; break; }
       }
       if (badLink >= 0) {
         check('prover_binding', false, 'Linked wallet ' + badLink + ' does not hash to the report linked-prover commitment.');

@@ -301,3 +301,33 @@ test('report + disclosure parity with score and linked wallets', async () => {
   assert.equal(browserBuilt.score.value, score.value);
   assert.deepEqual(browserBuilt.linkedProvers, [linked]);
 });
+
+test('salt parity: browser and Node salted commitments agree', async () => {
+  const salt = nodeReport.newProverSalt();
+  assert.match(salt, /^[0-9a-f]{32}$/);
+  assert.match(browserReport.newProverSalt(), /^[0-9a-f]{32}$/);
+  const nodeHash = nodeReport.saltedAddressHash(salt, 'alice.testnet');
+  const browserHash = await browserReport.saltedAddressHash(salt, 'alice.testnet');
+  assert.equal(browserHash, nodeHash);
+  assert.equal(await browserReport.commitAddress('alice.testnet', salt), nodeReport.commitAddress('alice.testnet', salt));
+  assert.equal(await browserReport.commitAddress('alice.testnet'), nodeReport.commitAddress('alice.testnet'));
+  // Salted disclosure packages agree across paths, including the salt.
+  const claims = nodeEngine.evaluateClaims(SNAPSHOT, POLICY, NOW_NS).claims;
+  const report = nodeReport.buildReport({
+    proverAddressHash: nodeHash,
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: SNAPSHOT.dataHash, attestationRef: null },
+    expiresAt: '1825497600000000000',
+  });
+  const nodePkg = nodeDisclosure.buildDisclosurePackage(report, 'alice.testnet', SNAPSHOT, salt);
+  const browserPkg = await browserDisclosure.buildDisclosurePackage(report, 'alice.testnet', SNAPSHOT, salt);
+  assert.deepEqual(browserPkg, nodePkg);
+  assert.equal(browserPkg.salt, salt);
+  // The tripwire refuses a report carrying the salt, on both paths.
+  const leaked = { ...report, note: salt };
+  assert.throws(() => browserDisclosure.assertPublicReportClean(leaked, 'alice.testnet', [], salt), /leaks a prover salt/);
+  assert.throws(() => nodeDisclosure.assertPublicReportClean(leaked, 'alice.testnet', [], salt), /leaks a prover salt/);
+  assert.equal(browserDisclosure.assertPublicReportClean(report, 'alice.testnet', TXS.map((t) => t.hash), salt), true);
+});
