@@ -7,7 +7,8 @@
   "private": true,
   "scripts": {
     "test": "node --test",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "audit": "node scripts/privacy-audit.mjs"
   },
   "type": "module",
   "version": "0.1.0",
