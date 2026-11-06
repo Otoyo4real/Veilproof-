@@ -60,7 +60,14 @@ test('agent CLI: dry run against the demo wallets builds a signature-linked repo
   const disclosure = JSON.parse(readFileSync(join(out, 'disclosure.json'), 'utf8'));
   const policy = JSON.parse(readFileSync(join(out, 'policy.json'), 'utf8'));
   assert.match(report.reportId, /^[0-9a-f]{16}$/);
-  assert.equal(report.score.value, 770);
+  // P3: the public report carries the band, not the exact score or
+  // exact claim values — the CLI still prints the prover's own exact
+  // score (770) to its own terminal, which the stdout assertion above
+  // covers.
+  assert.equal(report.score.value, undefined);
+  assert.equal(report.score.band, 'solid');
+  assert.ok(report.claims.every((c) => c.value === undefined));
+  assert.ok(report.claims.every((c) => typeof c.threshold === 'string' || typeof c.threshold === 'number'));
   assert.equal(report.aiSummary, null);
   assert.equal(disclosure.linked.length, 1);
   assert.equal(disclosure.linked[0].address, 'demo2.veilproof.testnet');

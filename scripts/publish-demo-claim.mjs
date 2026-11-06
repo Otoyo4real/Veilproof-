@@ -42,7 +42,7 @@ import {
   applyUnderwritingGuard,
 } from '../src/ai-analysis.js';
 import { canonicalJson } from '../src/canonical.js';
-import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
+import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, saltedAddressHash } from '../src/report.js';
 import { buildMultiDisclosurePackage, assertPublicReportClean } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
 
@@ -242,8 +242,14 @@ const aiSummary = {
 console.log(`  PASS — verdict ${guarded.verdict}${guarded.suggestedLimitNear !== null ? `, suggested limit ${guarded.suggestedLimitNear} NEAR` : ''}, confidence ${guarded.confidence}, ${guarded.points.length} points, attestation nonce echoed by ${gwEcho ? 'gateway' : ''}${gwEcho && mdlEcho ? ' + ' : ''}${mdlEcho ? 'model' : ''}, chat ${aiOut.chat_id}`);
 
 console.log('[5/7] Build report + multi disclosure package + hashes');
-const proverAddressHash = createHash('sha256').update(DEMO_ACCOUNT, 'utf8').digest('hex');
-const linkedProverHashes = [createHash('sha256').update(LINKED_ACCOUNT, 'utf8').digest('hex')];
+console.log('  P2: fresh salts per report — the public commitments are salted,');
+console.log('  the salts travel only in the disclosure package.');
+console.log('  P3: buildReport strips exact values — the public report');
+console.log('  carries thresholds and the score band only.');
+const proverSalt = newProverSalt();
+const linkedSalt = newProverSalt();
+const proverAddressHash = saltedAddressHash(proverSalt, DEMO_ACCOUNT);
+const linkedProverHashes = [saltedAddressHash(linkedSalt, LINKED_ACCOUNT)];
 const expiresAt = computeExpiresAt(EXPIRY_DAYS);
 // The evidence data hash is the MULTI hash over ALL snapshots (primary +
 // linked), not the primary's single-wallet hash — mirroring app.js.
@@ -258,11 +264,11 @@ const report = buildReport({
   linkedProverHashes,
   score,
 });
-assertPublicReportClean(report, DEMO_ACCOUNT, primary.txs.map((t) => t.hash));
-assertPublicReportClean(report, LINKED_ACCOUNT, linked.txs.map((t) => t.hash));
+assertPublicReportClean(report, DEMO_ACCOUNT, primary.txs.map((t) => t.hash), [proverSalt, linkedSalt]);
+assertPublicReportClean(report, LINKED_ACCOUNT, linked.txs.map((t) => t.hash), [proverSalt, linkedSalt]);
 const disclosurePackage = buildMultiDisclosurePackage(report, DEMO_ACCOUNT, primary, [
-  { address: LINKED_ACCOUNT, snapshot: linked, linkTxHash: LINK_TX_HASH },
-]);
+  { address: LINKED_ACCOUNT, snapshot: linked, linkTxHash: LINK_TX_HASH, salt: linkedSalt },
+], proverSalt);
 const hashes = {
   report_hash: reportHash(report),
   evidence_hash: evidenceHash(report.evidenceRefs),

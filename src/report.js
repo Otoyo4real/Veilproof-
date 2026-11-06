@@ -169,6 +169,13 @@ export function policyHash(policyVersion, policy) {
 //   src/score.js ({ version, value, band, components }). A report
 //   without a score is honest ("not scored"); the verifier recomputes
 //   the score when one is present and fails the report when it differs.
+// - includeExactValues (default false, P3): when false, the public
+//   report carries PREDICATES only — claims keep { id, passed,
+//   threshold } and the score keeps { version, band, components
+//   without points }. The exact values stay in the private disclosure
+//   package (the verifier recomputes them from the snapshots). When
+//   true, the exact values are kept — legacy format only, for tests
+//   and for verifying old reports. Never set it for a new publish.
 export function buildReport({
   proverAddressHash,
   claims,
@@ -179,6 +186,7 @@ export function buildReport({
   disclosedFields,
   linkedProverHashes = [],
   score = null,
+  includeExactValues = false,
 }) {
   requireHexHash(proverAddressHash, 'proverAddressHash');
   if (!Array.isArray(claims)) {
@@ -219,6 +227,31 @@ export function buildReport({
   const disclosedSet = new Set(disclosedIds);
   const disclosedClaims = claims.filter((c) => disclosedSet.has(c.id));
 
+  // P3 predicate disclosure: the public report carries thresholds and
+  // bands only. Exact claim values and the exact score (plus per-
+  // component points) are stripped here, at the one place a public
+  // report is built, so no caller can publish them by accident. The
+  // verifier recomputes the exact values from the disclosure
+  // snapshots and checks them against these predicates.
+  const publicClaims = includeExactValues
+    ? disclosedClaims
+    : disclosedClaims.map((c) => ({ id: c.id, passed: c.passed, threshold: c.threshold }));
+  const publicScore =
+    score === null
+      ? null
+      : includeExactValues
+        ? score
+        : {
+            version: score.version,
+            band: score.band,
+            components: score.components.map((comp) => ({
+              id: comp.id,
+              label: comp.label,
+              max: comp.max,
+              measured: comp.measured,
+            })),
+          };
+
   if (!Array.isArray(linkedProverHashes) || linkedProverHashes.some((h) => !SHA256_HEX.test(h))) {
     throw new Error('buildReport: linkedProverHashes must be an array of 64-char lowercase hex SHA-256 hashes');
   }
@@ -245,12 +278,12 @@ export function buildReport({
     prover: proverAddressHash,
     linkedProvers: [...linkedProverHashes],
     createdAt: new Date().toISOString(),
-    claims: disclosedClaims,
+    claims: publicClaims,
     policyVersion,
     aiSummary,
     evidenceRefs: { attestationRef: evidenceRefs.attestationRef, dataHash: evidenceRefs.dataHash },
     expiresAt,
     disclosed: disclosedClaims.map((c) => c.id),
-    score,
+    score: publicScore,
   };
 }

@@ -876,7 +876,7 @@ async function buildReportAndHashes() {
       esc(report.prover) + '</span></p>' +
       (report.linkedProvers.length > 0 ? '<p>Linked wallets: ' + report.linkedProvers.length + ' (commitments only).</p>' : '') +
       (report.score
-        ? '<p>Credit score: <strong>' + report.score.value + ' / 1000 (' + esc(report.score.band) + ')</strong> — recomputable by any app from the disclosure package.</p>'
+        ? '<p>Credit score: <strong>' + state.score.value + ' / 1000 (' + esc(report.score.band) + ')</strong> — your exact score; the public report carries only the band, recomputable by any app from the disclosure package.</p>'
         : '<p>Credit score: not scored.</p>') +
       '<p>AI summary: ' + (report.aiSummary === null ? 'Not analysed.' : esc(report.aiSummary.verdict ?? report.aiSummary.role ?? 'analysed') + ' (NEAR AI Cloud, advisory).') + '</p>' +
       '<p>Report hash: <span class="mono">' + esc(hashes.report_hash) + '</span></p>' +

@@ -65,6 +65,18 @@ held. The wash attack above collapses: v2 gives it sustained 350 +
 time-weighted 150 + activity 0 + volume 0 + diversity 0 + no_failed 100 +
 staked 0 = **600** — the bottom edge of solid, down 320 points from 920.
 
+## Predicate disclosure (P3) — live 2026-11-06
+
+The score is computed exactly as above, but the **public report no longer carries the exact value or the per-component points**. It carries:
+
+- `version` (`score-v2`), `band` (`thin` / `building` / `solid` / `strong`), and the component shapes (`id`, `label`, `max`, `measured`) — no `value`, no `points`.
+
+The exact value and points live only in the private disclosure package (the verifier recomputes them from the snapshots). The verifier checks the recomputed exact score falls in the public band and the components match on `id`/`label`/`max`/`measured`; a tampered band fails. The check detail prints the band, never the number.
+
+Pre-P3 reports carry the exact value and points and still verify (legacy path: exact match). `buildReport` strips exact values by default; `includeExactValues: true` is the legacy opt-in for tests only — never for a new publish. The tripwire (`assertPublicReportClean`) refuses any report that carries an exact value or points.
+
+Same for claims (see `docs/privacy-audit.md`): the public report carries `{ id, passed, threshold }` only. The verifier checks the recomputed claim's `passed` and `threshold` match, and for legacy reports the exact `value` too.
+
 ## Honest limits (say these in the submission, do not hide them)
 
 - Diversity counts distinct accounts, and a determined prover can create

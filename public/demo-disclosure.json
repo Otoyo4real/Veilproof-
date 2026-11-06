@@ -1,14 +1,14 @@
 {
   "address": "veilproof-demo.testnet",
-  "dataHash": "bdca6d8278986236f79ba1f481c0de26a3d54cd6105fe40573eaf0c5c6ca8190",
-  "reportId": "a41d9faaa0a19148",
+  "dataHash": "5789e16242468141c8785e82d52161710f2062e6feb4f44e495329dc2ebfbf06",
+  "reportId": "b05bf4684960ee83",
   "snapshot": {
     "account": {
       "accountId": "veilproof-demo.testnet",
-      "amount": "11148300331437780800000000",
+      "amount": "11148040694449401200000000",
       "locked": "0",
       "storage_usage": 182,
-      "blockHeight": 276503269
+      "blockHeight": 276515245
     },
     "txs": [
       {
@@ -57,28 +57,29 @@
         "blockTimestampNs": "1793959408841161770"
       }
     ],
-    "blockHeight": 276503269,
+    "blockHeight": 276515245,
     "balanceSamples": [
       {
-        "blockHeight": 276500617,
-        "amount": "11148300331437780800000000"
+        "blockHeight": 276512600,
+        "amount": "11148040694449401200000000"
       },
       {
-        "blockHeight": 276501517,
-        "amount": "11148300331437780800000000"
+        "blockHeight": 276513500,
+        "amount": "11148040694449401200000000"
       },
       {
-        "blockHeight": 276502417,
-        "amount": "11148300331437780800000000"
+        "blockHeight": 276514400,
+        "amount": "11148040694449401200000000"
       },
       {
-        "blockHeight": 276503317,
-        "amount": "11148300331437780800000000"
+        "blockHeight": 276515300,
+        "amount": "11148040694449401200000000"
       }
     ],
     "balanceSampleWindowHours": 1,
-    "dataHash": "bdca6d8278986236f79ba1f481c0de26a3d54cd6105fe40573eaf0c5c6ca8190"
+    "dataHash": "5789e16242468141c8785e82d52161710f2062e6feb4f44e495329dc2ebfbf06"
   },
+  "salt": "e051737285cb7601ef5e809181b8f7d5",
   "linked": [
     {
       "address": "demo2.veilproof.testnet",
@@ -89,7 +90,7 @@
           "amount": "1499955363487500000000000",
           "locked": "0",
           "storage_usage": 182,
-          "blockHeight": 276503343
+          "blockHeight": 276515325
         },
         "txs": [
           {
@@ -102,28 +103,29 @@
             "blockTimestampNs": "1793971079285340576"
           }
         ],
-        "blockHeight": 276503343,
+        "blockHeight": 276515325,
         "balanceSamples": [
           {
-            "blockHeight": 276500617,
+            "blockHeight": 276512600,
             "amount": "1499955363487500000000000"
           },
           {
-            "blockHeight": 276501517,
+            "blockHeight": 276513500,
             "amount": "1499955363487500000000000"
           },
           {
-            "blockHeight": 276502417,
+            "blockHeight": 276514400,
             "amount": "1499955363487500000000000"
           },
           {
-            "blockHeight": 276503317,
+            "blockHeight": 276515300,
             "amount": "1499955363487500000000000"
           }
         ],
         "balanceSampleWindowHours": 1,
-        "dataHash": "659b755559fec9d5cf825725b9e81251f1ddb50dd3d958caf86353b0aea7c110"
-      }
+        "dataHash": "5a89e94c792fa943a256caa64da6a45690b732e60969ed87959c0039135c1caa"
+      },
+      "salt": "f15c45c8080b1ed8a583f90dd4d984eb"
     }
   ]
 }

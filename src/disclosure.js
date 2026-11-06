@@ -209,5 +209,27 @@ export function assertPublicReportClean(report, address, txHashes, salts) {
       throw new Error('assertPublicReportClean: report leaks a prover salt');
     }
   }
+  // P3 predicate disclosure: a public report must not carry exact
+  // values — claims must have no `value` field, the score must have
+  // no `value`, and no score component may carry `points`. Exact
+  // values live only in the private disclosure package (the verifier
+  // recomputes them from the snapshots). Legacy reports already
+  // published carry values; the tripwire is only run on reports being
+  // built now, so it never sees them.
+  for (const claim of Array.isArray(report.claims) ? report.claims : []) {
+    if (claim && typeof claim === 'object' && claim.value !== undefined) {
+      throw new Error(`assertPublicReportClean: report leaks the exact value of claim ${claim.id}`);
+    }
+  }
+  if (report.score && typeof report.score === 'object') {
+    if (report.score.value !== undefined) {
+      throw new Error('assertPublicReportClean: report leaks the exact score value');
+    }
+    for (const comp of Array.isArray(report.score.components) ? report.score.components : []) {
+      if (comp && typeof comp === 'object' && comp.points !== undefined) {
+        throw new Error(`assertPublicReportClean: report leaks the exact points of score component ${comp.id}`);
+      }
+    }
+  }
   return true;
 }

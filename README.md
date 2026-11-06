@@ -60,17 +60,17 @@ score-v2 is 0–1000 from seven components, all computed from the disclosed snap
 ## Status
 
 Built and live. Registry deployed on NEAR testnet. The live demo claim is a
-multi-wallet agent treasury proof: report `a41d9faaa0a19148`, publish tx
-`3za51UYQNxrkZQT54ZPyTS8BHwRLKbCMFhZwXHuUFNoE`, score **770/1000 (solid)**,
-AI underwriting **lend_with_limits, suggested limit 3 NEAR** (about a quarter
-of the ~12.65 NEAR sustained balance — the model did the arithmetic itself;
-a deterministic guard would have capped it there anyway). All 9 checks pass
-onchain, and the full test suite is green (125/125). The live site runs the AI
-underwriting with a real attested summary. Earlier demo claims
-(`86f237c0cf2e3fe6`, `bf2518ecb0791e4a`, `063feb0181ad5577`) stay valid
-onchain and were superseded, never revoked. Hackathon: NEAR Hackathon 2026
-(Build Beyond Boundaries), tracks: Privacy & Private AI primary, Agent
-Economy second. Deadline: 14 Nov 2026 23:59 UTC. Testnet only.
+multi-wallet agent treasury proof: report `b05bf4684960ee83`, publish tx
+`3ouNst9DcYkcptEpua7EzqdLDmuY8P8uFsKRgU9TW9PQ`, score band **solid** (the
+public report carries the band, not the exact score — the prover's own exact
+score is 770), AI underwriting **lend_with_limits, suggested limit 5 NEAR**.
+All 9 checks pass onchain, and the full test suite is green (140 tests).
+The live site runs the AI underwriting with a real attested summary. Earlier
+demo claims (`a41d9faaa0a19148`, `86f237c0cf2e3fe6`, `bf2518ecb0791e4a`,
+`063feb0181ad5577`) stay valid onchain and were superseded, never revoked.
+Hackathon: NEAR Hackathon 2026 (Build Beyond Boundaries), tracks: Privacy &
+Private AI primary, Agent Economy second. Deadline: 14 Nov 2026 23:59 UTC.
+Testnet only.
 
 ## Judge in 10 minutes
 
@@ -78,8 +78,9 @@ Economy second. Deadline: 14 Nov 2026 23:59 UTC. Testnet only.
    **Try the live demo claim** — a real published multi-wallet claim is
    verified against its onchain record. You should see VALID and all nine
    checks passing: prover binding (including the linked wallet), hashes,
-   claims, the recomputed score (770, solid), the link proof, and validity
-   — plus the attested underwriting summary.
+   claims (predicates — thresholds and pass/fail, no exact values), the
+   recomputed score band (solid), the link proof, and validity — plus the
+   attested underwriting summary.
 2. On the main page, build a report for the demo wallet yourself and press
    **Underwrite with NEAR AI** — the verdict comes back attested
    (verifiable, nonce matched), advisory only.

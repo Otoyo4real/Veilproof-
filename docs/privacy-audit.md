@@ -73,7 +73,26 @@ P2 fixed the commitment leaks. The exact-value leaks remain until P3.
 | (c) Score estimate error (mean) | 0.00% | exact = 0% | LEAK — P3 |
 | Live demo claim `a41d9faaa0a19148` | dictionary recovery YES, exact balance visible YES, exact score visible YES (770) | — | LEAK — old pre-P2 report; P3 republishes it |
 
-## Results — AFTER (to be filled when P3 lands)
+## Results — AFTER P3 (predicates), 2026-11-06
+
+P3 strips exact values from the public report (claims keep `{ id, passed, threshold }`, score keeps `{ version, band, components }` without `value`/`points`). The attacker can now only read thresholds and bands.
+
+| Attack | Result | Chance / baseline | Verdict |
+| --- | --- | --- | --- |
+| (a) Address recovery (dictionary) | 0/50 recovered — 0/45 random, 0/5 named | — | PASS |
+| (b) Linking via prover commitment | no clusters at all (every report has a unique commitment) | chance 1.0% | PASS |
+| (b) Linking via registry owner field | precision 100.0% | chance 1.0% | LEAK (documented limit) |
+| (c) Balance estimate error (mean) | 94.04% | exact = 0% | PASS |
+| (c) Score estimate error (mean) | 6.22% | exact = 0% | PASS |
+| Live demo claim `a41d9faaa0a19148` | dictionary recovery YES, exact balance visible YES, exact score visible YES (770) | — | LEAK — old pre-P2/pre-P3 report; republication below replaces it |
+
+The balance estimator now reads the claim threshold (1 NEAR) instead of the exact balance (2–50 NEAR), so it underestimates by 94% on average. The score estimator reads the band midpoint (e.g. 700 for solid) instead of the exact score, so it errs by 6.22% on average — small, because bands are 200–300 points wide, but it is a bound, not the number, and the exact score is no longer published anywhere.
+
+## Demo claim republished (P2 + P3), 2026-11-06
+
+New live demo claim `b05bf4684960ee83`, publish tx `3ouNst9DcYkcptEpua7EzqdLDmuY8P8uFsKRgU9TW9PQ` (script `scripts/publish-demo-claim.mjs`, salts + predicate format). The audit's live-claim line now reads: dictionary recovery **no**, exact balance visible **no**, exact score visible **no**. The old claim `a41d9faaa0a19148` stays valid onchain, superseded, never revoked. The landing-page mock report and README now show the new claim in predicate form (Pass + threshold, band only).
+
+## Results — AFTER (to be filled when P4 lands)
 
 | Attack | Result | Chance / baseline | Verdict |
 | --- | --- | --- | --- |

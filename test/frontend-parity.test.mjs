@@ -298,7 +298,11 @@ test('report + disclosure parity with score and linked wallets', async () => {
   nodeBuilt.createdAt = '2026-11-06T00:00:00.000Z';
   browserBuilt.createdAt = '2026-11-06T00:00:00.000Z';
   assert.deepEqual(browserBuilt, nodeBuilt);
-  assert.equal(browserBuilt.score.value, score.value);
+  // P3: the public report carries the band, not the exact value or
+  // per-component points — on both paths.
+  assert.equal(browserBuilt.score.band, score.band);
+  assert.equal(browserBuilt.score.value, undefined);
+  assert.ok(browserBuilt.score.components.every((c) => c.points === undefined));
   assert.deepEqual(browserBuilt.linkedProvers, [linked]);
 });
 

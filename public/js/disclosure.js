@@ -202,5 +202,23 @@ export function assertPublicReportClean(report, address, txHashes, salts) {
       throw new Error('assertPublicReportClean: report leaks a prover salt');
     }
   }
+  // P3 predicate disclosure — mirror of src/disclosure.js: a public
+  // report must not carry exact values (no claim `value`, no score
+  // `value`, no component `points`).
+  for (const claim of Array.isArray(report.claims) ? report.claims : []) {
+    if (claim && typeof claim === 'object' && claim.value !== undefined) {
+      throw new Error(`assertPublicReportClean: report leaks the exact value of claim ${claim.id}`);
+    }
+  }
+  if (report.score && typeof report.score === 'object') {
+    if (report.score.value !== undefined) {
+      throw new Error('assertPublicReportClean: report leaks the exact score value');
+    }
+    for (const comp of Array.isArray(report.score.components) ? report.score.components : []) {
+      if (comp && typeof comp === 'object' && comp.points !== undefined) {
+        throw new Error(`assertPublicReportClean: report leaks the exact points of score component ${comp.id}`);
+      }
+    }
+  }
   return true;
 }

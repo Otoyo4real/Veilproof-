@@ -421,9 +421,13 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const { report, onchainRecord, disclosurePackage, policy, nowNs } = genuine();
   const snap = disclosurePackage.snapshot;
   const score = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, nowNs);
+  // Build the scored report from the EVALUATED claims (which carry
+  // exact values) — the built report's claims are predicates only
+  // since P3 and cannot be fed back into buildReport.
+  const evaluated = evaluateClaims(snap, POLICY, nowNs).claims;
   const scored = buildReport({
     proverAddressHash: report.prover,
-    claims: report.claims,
+    claims: evaluated,
     policyVersion: POLICY_VERSION,
     aiSummary: null,
     evidenceRefs: report.evidenceRefs,
@@ -434,8 +438,33 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const ok = verifyReport({ report: scored, onchainRecord: record, disclosurePackage, policy, nowNs });
   assert.equal(ok.valid, true);
   assert.equal(checkByName(ok, 'score').passed, true);
-  // Tamper with the reported score value (and re-sign the report hash so only the score check can fail).
-  const tampered = { ...scored, score: { ...score, value: score.value + 1 } };
+  // The public score is a predicate: band only, no exact value.
+  assert.equal(scored.score.value, undefined);
+  assert.equal(scored.score.band, score.band);
+  // Tamper with the reported score band (and re-sign the report hash so only the score check can fail).
+  const tamperedBand = { ...scored, score: { ...scored.score, band: scored.score.band === 'solid' ? 'strong' : 'solid' } };
+  const tamperedBandRecord = onchainRecordFor(tamperedBand);
+  const badBand = verifyReport({ report: tamperedBand, onchainRecord: tamperedBandRecord, disclosurePackage, policy, nowNs });
+  assert.equal(badBand.valid, false);
+  assert.equal(checkByName(badBand, 'score').passed, false);
+  assert.equal(checkByName(badBand, 'report_hash').passed, true);
+  // A legacy (pre-P3) report with an exact value still verifies, and
+  // tampering with that value still fails.
+  const legacyScored = buildReport({
+    proverAddressHash: report.prover,
+    claims: evaluated,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: report.evidenceRefs,
+    expiresAt: EXPIRES_AT,
+    score,
+    includeExactValues: true,
+  });
+  const legacyRecord = onchainRecordFor(legacyScored);
+  const legacyOk = verifyReport({ report: legacyScored, onchainRecord: legacyRecord, disclosurePackage, policy, nowNs });
+  assert.equal(legacyOk.valid, true);
+  assert.equal(checkByName(legacyOk, 'score').passed, true);
+  const tampered = { ...legacyScored, score: { ...score, value: score.value + 1 } };
   const tamperedRecord = onchainRecordFor(tampered);
   const bad = verifyReport({ report: tampered, onchainRecord: tamperedRecord, disclosurePackage, policy, nowNs });
   assert.equal(bad.valid, false);
@@ -446,7 +475,7 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const scoreV1 = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, nowNs, 'score-v1');
   const scoredV1 = buildReport({
     proverAddressHash: report.prover,
-    claims: report.claims,
+    claims: evaluated,
     policyVersion: POLICY_VERSION,
     aiSummary: null,
     evidenceRefs: report.evidenceRefs,
@@ -457,7 +486,8 @@ test('verify score: a scored report recomputes exactly; a tampered score fails',
   const okV1 = verifyReport({ report: scoredV1, onchainRecord: recordV1, disclosurePackage, policy, nowNs });
   assert.equal(okV1.valid, true);
   assert.equal(checkByName(okV1, 'score').passed, true);
-  assert.equal(checkByName(okV1, 'score').detail, `Score recomputed exactly: ${scoreV1.value} (${scoreV1.band}).`);
+  // P3: the predicate detail carries the band, not the exact value.
+  assert.equal(checkByName(okV1, 'score').detail, `Score recomputed from the disclosure snapshot: band ${scoreV1.band} (matches the public band).`);
 });
 
 test('verify multi-wallet: aggregate claims + link proofs verify; a fake link fails', () => {
@@ -686,4 +716,65 @@ test('verify legacy: an unsalted (pre-P2) report still verifies valid', () => {
   });
   assert.equal(result.valid, true);
   assert.equal(checkByName(result, 'prover_binding').passed, true);
+});
+
+test('verify predicate: a tampered threshold fails the claims check', () => {
+  const g = saltedGenuine();
+  // The saltedGenuine report is a predicate report (no claim values).
+  const tampered = JSON.parse(JSON.stringify(g.report));
+  tampered.claims[0].threshold = '999999999999999999999999999';
+  const record = onchainRecordFor(tampered);
+  const result = verifyReport({
+    report: tampered,
+    onchainRecord: record,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(result.valid, false);
+  assert.equal(checkByName(result, 'claims').passed, false);
+  assert.match(checkByName(result, 'claims').detail, /threshold differs/);
+  // And the untampered predicate report verifies with the predicate
+  // detail (no exact values in the message).
+  const ok = verifyReport({
+    report: g.report,
+    onchainRecord: g.onchainRecord,
+    disclosurePackage: g.disclosurePackage,
+    policy: g.policy,
+    nowNs: g.nowNs,
+  });
+  assert.equal(ok.valid, true);
+  assert.match(checkByName(ok, 'claims').detail, /reproduced as predicates/);
+});
+
+test('verify predicate: a scored predicate report verifies with the band only', () => {
+  const snap = snapshot();
+  const salt = newProverSalt();
+  const { claims } = evaluateClaims(snap, POLICY, NOW_NS);
+  const score = computeScore(snap, { txWindowDays: 30, volumeWindowDays: 30, noFailedWindowDays: 30 }, NOW_NS);
+  const report = buildReport({
+    proverAddressHash: saltedAddressHash(salt, ADDRESS),
+    claims,
+    policyVersion: POLICY_VERSION,
+    aiSummary: null,
+    evidenceRefs: { dataHash: snap.dataHash, attestationRef: null },
+    expiresAt: EXPIRES_AT,
+    score,
+  });
+  const disclosurePackage = buildDisclosurePackage(report, ADDRESS, snap, salt);
+  const result = verifyReport({
+    report,
+    onchainRecord: onchainRecordFor(report),
+    disclosurePackage,
+    policy: POLICY,
+    nowNs: NOW_NS,
+  });
+  assert.equal(result.valid, true);
+  assert.equal(checkByName(result, 'score').detail, `Score recomputed from the disclosure snapshot: band ${score.band} (matches the public band).`);
+  // The exact score never appears in the score check detail (the
+  // detail that used to print it), and the public report carries no
+  // exact value or points.
+  assert.equal(checkByName(result, 'score').detail.includes(String(score.value)), false);
+  assert.equal(report.score.value, undefined);
+  assert.ok(report.score.components.every((c) => c.points === undefined));
 });

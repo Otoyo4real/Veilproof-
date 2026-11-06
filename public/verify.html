@@ -858,7 +858,13 @@ touched the chain. A report with no AI summary means "not analysed", not
               failure = 'Claim ' + claim.id + ' passed value differs (report: ' + claim.passed + ', re-run: ' + again.passed + ').';
               break;
             }
-            if (String(again.value) !== String(claim.value)) {
+            if (String(again.threshold) !== String(claim.threshold)) {
+              failure = 'Claim ' + claim.id + ' threshold differs (report: ' + claim.threshold + ', re-run: ' + again.threshold + ').';
+              break;
+            }
+            // Legacy reports (pre-P3) carry the exact value: it must
+            // match too. Predicate reports carry no value.
+            if (claim.value !== undefined && String(again.value) !== String(claim.value)) {
               failure = 'Claim ' + claim.id + ' value differs (report: ' + claim.value + ', re-run: ' + again.value + ').';
               break;
             }
@@ -867,7 +873,10 @@ touched the chain. A report with no AI summary means "not analysed", not
         if (failure) {
           check('claims', false, failure);
         } else {
-          check('claims', true, 'All ' + report.claims.length + ' disclosed claim(s) reproduced exactly from the disclosure snapshot.');
+          var predicate = report.claims.some(function (c) { return c.value === undefined; });
+          check('claims', true, predicate
+            ? 'All ' + report.claims.length + ' disclosed claim(s) reproduced as predicates from the disclosure snapshot (thresholds and pass/fail match; exact values verified privately).'
+            : 'All ' + report.claims.length + ' disclosed claim(s) reproduced exactly from the disclosure snapshot.');
         }
       }
     } catch (err) {
@@ -880,14 +889,31 @@ touched the chain. A report with no AI summary means "not analysed", not
       } else {
         var windows = { txWindowDays: policy.txWindowDays, volumeWindowDays: policy.volumeWindowDays, noFailedWindowDays: policy.noFailedWindowDays };
         var againScore = computeScore(bundle, windows, nowNs, report.score.version);
-        var sameScore = againScore.version === report.score.version &&
-          againScore.value === report.score.value &&
-          againScore.band === report.score.band &&
-          JSON.stringify(againScore.components) === JSON.stringify(report.score.components);
-        if (sameScore) {
-          check('score', true, 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').');
+        var stripPoints = function (components) {
+          return (components || []).map(function (c) { return { id: c.id, label: c.label, max: c.max, measured: c.measured }; });
+        };
+        var sameScore = false;
+        var scoreDetail = '';
+        if (report.score.value !== undefined && report.score.value !== null) {
+          sameScore = againScore.version === report.score.version &&
+            againScore.value === report.score.value &&
+            againScore.band === report.score.band &&
+            JSON.stringify(againScore.components) === JSON.stringify(report.score.components);
+          scoreDetail = sameScore
+            ? 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').'
+            : 'Score differs on re-run (report: ' + report.score.value + ', re-run: ' + againScore.value + ').';
         } else {
-          check('score', false, 'Score differs on re-run (report: ' + report.score.value + ', re-run: ' + againScore.value + ').');
+          sameScore = againScore.version === report.score.version &&
+            againScore.band === report.score.band &&
+            JSON.stringify(stripPoints(againScore.components)) === JSON.stringify(stripPoints(report.score.components));
+          scoreDetail = sameScore
+            ? 'Score recomputed from the disclosure snapshot: band ' + againScore.band + ' (matches the public band).'
+            : 'Score band differs on re-run (report band: ' + report.score.band + ', re-run band: ' + againScore.band + ').';
+        }
+        if (sameScore) {
+          check('score', true, scoreDetail);
+        } else {
+          check('score', false, scoreDetail);
         }
       }
     } catch (err) {
@@ -1071,10 +1097,13 @@ touched the chain. A report with no AI summary means "not analysed", not
       return '<div class="check ' + (c.passed ? 'pass' : 'fail') + '"><span class="mark">' +
         (c.passed ? '✓' : '✗') + ' ' + esc(c.check) + '</span><div class="detail">' + esc(c.detail) + '</div></div>';
     }).join('');
-    var claimsHtml = '<table><tr><th>Claim</th><th>Passed</th><th>Value</th><th>Threshold</th></tr>' +
+    // P3 predicate disclosure: the public report carries thresholds
+    // and bands only, so the table shows Claim / Passed / Threshold.
+    // Exact values live only in the private disclosure package and
+    // are never displayed here, even to the verifier.
+    var claimsHtml = '<table><tr><th>Claim</th><th>Passed</th><th>Threshold</th></tr>' +
       report.claims.map(function (c) {
-        return '<tr><td>' + esc(c.id) + '</td><td>' + (c.passed ? 'yes' : 'NO') + '</td><td class="mono">' +
-          esc(c.value) + '</td><td class="mono">' + esc(c.threshold) + '</td></tr>';
+        return '<tr><td>' + esc(c.id) + '</td><td>' + (c.passed ? 'yes' : 'NO') + '</td><td class="mono">' + esc(c.threshold) + '</td></tr>';
       }).join('') + '</table>';
     // What was NOT disclosed: claims the re-run finds that the report
     // does not list. The verifier holds the snapshot, so it can see
@@ -1103,7 +1132,7 @@ touched the chain. A report with no AI summary means "not analysed", not
       : 'Attached (see report JSON).';
     el('facts').innerHTML =
       '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
-      '<p>Prover commitment (SHA-256 of the wallet address — the address itself is never shown):<br><span class="mono">' + esc(report.prover) + '</span></p>' +
+      '<p>Prover commitment (salted SHA-256 of the wallet address — fresh salt per report, so two reports cannot be matched; the address itself is never shown):<br><span class="mono">' + esc(report.prover) + '</span></p>' +
       '<p>Policy version: <span class="mono">' + esc(report.policyVersion) + '</span></p>' +
       '<p>Created: <span class="mono">' + esc(report.createdAt) + '</span></p>' +
       '<p>Expires: <span class="mono">' + esc(expires) + '</span></p>' +

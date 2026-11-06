@@ -141,6 +141,7 @@ export function buildReport({
   disclosedFields,
   linkedProverHashes = [],
   score = null,
+  includeExactValues = false,
 }) {
   requireHexHash(proverAddressHash, 'proverAddressHash');
   if (!Array.isArray(claims)) {
@@ -181,6 +182,29 @@ export function buildReport({
   const disclosedSet = new Set(disclosedIds);
   const disclosedClaims = claims.filter((c) => disclosedSet.has(c.id));
 
+  // P3 predicate disclosure — mirror of src/report.js: the public
+  // report carries thresholds and bands only. Exact claim values and
+  // the exact score (plus per-component points) are stripped here, at
+  // the one place a public report is built.
+  const publicClaims = includeExactValues
+    ? disclosedClaims
+    : disclosedClaims.map((c) => ({ id: c.id, passed: c.passed, threshold: c.threshold }));
+  const publicScore =
+    score === null
+      ? null
+      : includeExactValues
+        ? score
+        : {
+            version: score.version,
+            band: score.band,
+            components: score.components.map((comp) => ({
+              id: comp.id,
+              label: comp.label,
+              max: comp.max,
+              measured: comp.measured,
+            })),
+          };
+
   if (!Array.isArray(linkedProverHashes) || linkedProverHashes.some((h) => !SHA256_HEX.test(h))) {
     throw new Error('buildReport: linkedProverHashes must be an array of 64-char lowercase hex SHA-256 hashes');
   }
@@ -207,12 +231,12 @@ export function buildReport({
     prover: proverAddressHash,
     linkedProvers: [...linkedProverHashes],
     createdAt: new Date().toISOString(),
-    claims: disclosedClaims,
+    claims: publicClaims,
     policyVersion,
     aiSummary,
     evidenceRefs: { attestationRef: evidenceRefs.attestationRef, dataHash: evidenceRefs.dataHash },
     expiresAt,
     disclosed: disclosedClaims.map((c) => c.id),
-    score,
+    score: publicScore,
   };
 }
