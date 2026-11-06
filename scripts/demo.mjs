@@ -3,7 +3,7 @@
 //   npm run demo
 //
 // Loads the committed public demo files (the live demo claim's report,
-// disclosure package and policy), verifies all 9 checks locally against
+// disclosure package and policy), verifies all 10 checks locally against
 // hashes computed from the report itself, then tampers with one claim
 // value and shows the hash check failing. No wallet, no key, no network,
 // no publish — this is the verifier proving it actually checks, on
@@ -32,11 +32,15 @@ const localRecord = {
   valid: true,
 };
 
-console.log(`Demo claim ${report.reportId} — score ${report.score.value} (${report.score.band}, ${report.score.version})`);
+const scoreLabel =
+  report.score.value !== undefined && report.score.value !== null
+    ? `score ${report.score.value} (${report.score.band}, ${report.score.version})`
+    : `score band ${report.score.band} (${report.score.version}, predicate report — no exact value)`;
+console.log(`Demo claim ${report.reportId} — ${scoreLabel}`);
 console.log('Local verification (hashes recomputed from the report itself):');
 const result = await verifyReport({ report, onchainRecord: localRecord, disclosurePackage: disclosure, policy, nowNs });
 for (const c of result.checks) console.log(`  ${c.check}: ${c.passed ? 'PASS' : 'FAIL'} — ${c.detail}`);
-console.log(result.valid ? 'PASS — all 9 checks pass locally' : 'FAIL — local verification did not pass');
+console.log(result.valid ? 'PASS — all 10 checks pass locally' : 'FAIL — local verification did not pass');
 if (!result.valid) process.exit(1);
 
 // Tamper: change one claim value and show the verifier catching it.

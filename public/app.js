@@ -34,8 +34,17 @@ import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, commi
 import { buildDisclosurePackage, buildMultiDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
 import { encryptDisclosurePackage, verifierKeyFingerprint } from './js/crypto-box.js';
 import { fetchAccountSnapshot, dataHashForSnapshots } from './js/onchain.js';
+import { describeSampling } from './js/sampling.js';
 import { sha256Hex, randomHex } from './js/crypto.js';
 import { buildLinkMessage, verifyLinkSignature } from './js/nep413.js';
+// Registry v2 (commitments, allowlisted publisher): the publish step
+// probes the registry version. Against the deployed v1 registry the
+// connected wallet signs and is recorded as owner (the old flow).
+// Against a v2 registry only an allowlisted publisher may publish —
+// an ordinary connected wallet gets a clear message instead of a
+// failed transaction, and publishing goes through the dedicated
+// publisher account (CLI). See docs/contract-migration.md.
+import { probeContractVersion, isV2Version, buildPublishCommitments } from './js/registry.js';
 
 const NETWORK = 'testnet';
 const REGISTRY = 'registry.veilproof.testnet';
@@ -279,6 +288,40 @@ async function connectWallet() {
 }
 
 // --- Ownership challenge (demo step 2) ---
+
+function base64Utf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  bytes.forEach((b) => {
+    bin += String.fromCharCode(b);
+  });
+  return btoa(bin);
+}
+
+// Read-only contract view call (get_version probe, allowlist check).
+// Mirrors public/demo.js's rpcView. Throws on RPC errors, including a
+// missing method — probeContractVersion maps that to "v1 registry".
+async function rpcViewContract(method, args) {
+  const res = await fetch(RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'veilproof-app',
+      method: 'query',
+      params: {
+        request_type: 'call_function',
+        account_id: REGISTRY,
+        method_name: method,
+        args_base64: base64Utf8(JSON.stringify(args)),
+        finality: 'final',
+      },
+    }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message || json.error.name || 'RPC error');
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(json.result.result)));
+}
 
 async function rpcViewAccessKeyList(accountId) {
   const res = await fetch(RPC_URL, {
@@ -652,7 +695,13 @@ function renderClaims() {
       score.components
         .map((c) => '<tr><td>' + esc(c.label) + '</td><td>' + c.points + ' / ' + c.max + '</td><td>' + (c.measured ? 'yes' : 'not measured') + '</td></tr>')
         .join('') +
-      '</table></div>'
+      '</table></div>' +
+      (score.riskFlags && score.riskFlags.length > 0
+        ? '<p><strong>Risk flags:</strong></p><ul>' +
+          score.riskFlags.map((f) => '<li><strong>' + esc(f.type) + '</strong> (' + esc(f.severity) + '): ' + esc(f.detail) + '</li>').join('') +
+          '</ul>'
+        : '<p>No risk flags.</p>') +
+      (score.disclaimer ? '<p class="muted">' + esc(score.disclaimer) + '</p>' : '')
     : '';
   updateWalletUI();
 }
@@ -731,6 +780,24 @@ function buildMetrics() {
   };
 }
 
+// Attestation status label for the AI summary. The word VERIFIED is
+// shown only when the server reports status VERIFIED, meaning the
+// DCAP quote, nonce, response signature and measurements all checked.
+// A summary without a status (published before real verification
+// landed) is UNVERIFIED, never verified.
+function attestationStatusLabel(attestation) {
+  switch (attestation && attestation.status) {
+    case 'VERIFIED':
+      return 'VERIFIED (TEE quote, nonce, response signature and measurements all checked)';
+    case 'FAILED':
+      return 'FAILED (the attestation check failed)';
+    case 'EXPIRED':
+      return 'EXPIRED (the attestation evidence is past its validity window)';
+    default:
+      return 'UNVERIFIED (the attestation was not cryptographically verified)';
+  }
+}
+
 async function runAiAnalysis() {
   const status = $('aiStatus');
   try {
@@ -767,7 +834,7 @@ async function runAiAnalysis() {
       status.innerHTML =
         '<span class="ok">Underwriting judgment complete (advisory, not a guarantee).</span> Verdict: <strong>' +
         esc(body.summary.verdict) + '</strong> (' + limit + ', confidence ' + esc(body.summary.confidence) + '). ' +
-        'Attestation: ' + (body.summary.attestation?.verifiable ? 'verified (nonce matched)' : 'unattested') + '.';
+        'Attestation: ' + attestationStatusLabel(body.summary.attestation) + '. The verifier page shows the attestation details.';
       invalidateReport('the AI underwriting was added.');
     } else {
       status.textContent =
@@ -834,6 +901,11 @@ async function buildReportAndHashes() {
     // any balance samples); the single-wallet hash is only used when
     // there is one wallet and no samples.
     const dataHash = await dataHashForSnapshots([state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)]);
+    // Sampling evidence: the bundle-level record the verifier
+    // recomputes from the disclosed samples (10th check). It is
+    // derived from the pinned samples, so it is excluded from the
+    // report hash and checked by recomputation instead.
+    const sampling = describeSampling({ wallets: [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)] });
     const report = buildReport({
       proverAddressHash,
       claims: state.evaluation.claims,
@@ -844,14 +916,19 @@ async function buildReportAndHashes() {
       disclosedFields: disclosed,
       linkedProverHashes,
       score: state.score,
+      sampling,
     });
     // Tripwire: the public report must not contain any raw address, any
     // transaction hash, or any prover salt. If it ever did, refuse to
-    // show or publish it.
+    // show or publish it. Counterparty account ids (own or outside)
+    // are checked too: labels stay in the disclosure, never in the
+    // public report.
     const allAddresses = [state.previewAddress, ...state.linkedWallets.map((w) => w.address)];
     const allTxHashes = [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)].flatMap((s) => s.txs.map((t) => t.hash));
     const allSalts = [proverSalt, ...linkedSalts];
-    for (const addr of allAddresses) assertPublicReportClean(report, addr, allTxHashes, allSalts);
+    const counterpartyAccounts =
+      state.score && Array.isArray(state.score.counterpartyLabels) ? state.score.counterpartyLabels.map((l) => l.account) : [];
+    for (const addr of allAddresses) assertPublicReportClean(report, addr, allTxHashes, allSalts, counterpartyAccounts);
     const disclosurePackage =
       state.linkedWallets.length > 0
         ? await buildMultiDisclosurePackage(
@@ -944,15 +1021,64 @@ async function publish() {
     if (!state.report || !state.hashes) throw new Error('Build a report first.');
     if (!$('publishConfirm').checked) throw new Error('Tick the confirmation box first.');
     // The binding: the publish transaction is signed by the connected
-    // wallet, and the registry records the signer as the claim owner.
-    // If the signer is not the owner of the previewed address, the
-    // report would claim one wallet's history under another wallet's
-    // name — so refuse to sign at all, rather than publish a lie.
+    // wallet, and the report would claim one wallet's history under
+    // another wallet's name if the signer did not own the previewed
+    // address — so refuse to sign at all, rather than publish a lie.
+    // (On the v1 registry the signer is recorded as the claim owner;
+    // on v2 the signer is recorded only as a salted publisher
+    // commitment and the treasury never appears onchain — but the
+    // binding check is the same either way.)
     if (!previewMatchesConnected()) {
       throw new Error(
         'Connect the wallet that owns ' + (state.previewAddress || 'the previewed address') +
           ' before publishing, the connected wallet ' + (state.accountId || '(none)') + ' does not own it.',
       );
+    }
+    // Registry version gate: v2 only lets an allowlisted publisher
+    // publish. An ordinary connected wallet cannot publish directly
+    // any more — say so plainly instead of submitting a transaction
+    // the contract will reject. Report building and verification are
+    // unaffected; publishing goes through the dedicated publisher
+    // account (agent CLI, docs/contract-migration.md).
+    const registryVersion = await probeContractVersion(rpcViewContract);
+    let publishArgs;
+    if (isV2Version(registryVersion)) {
+      const authorized = await rpcViewContract('is_authorized_publisher', { account_id: state.accountId });
+      if (authorized !== true) {
+        throw new Error(
+          'This registry (v' + registryVersion + ') only accepts publishes from its dedicated publisher account, ' +
+          'and the connected wallet ' + state.accountId + ' is not one. ' +
+          'Your report is still built and verifiable — publish it with the agent CLI instead (node scripts/agent-prove.mjs --publish), ' +
+          'which signs through the dedicated publisher account.',
+        );
+      }
+      // Authorised publisher, also its own controller here.
+      const commitments = await buildPublishCommitments({
+        publisherAccountId: state.accountId,
+        controllerAccountId: state.accountId,
+      });
+      publishArgs = {
+        claim_id: state.report.reportId,
+        report_hash: state.hashes.report_hash,
+        evidence_hash: state.hashes.evidence_hash,
+        policy_hash: state.hashes.policy_hash,
+        // u64 as a JSON number: exactly representable by construction
+        // (see computeExpiresAt).
+        expires_at: Number(state.report.expiresAt),
+        controller_commitment: commitments.controller_commitment,
+        publisher_commitment: commitments.publisher_commitment,
+        commitment_salt: commitments.commitment_salt,
+      };
+    } else {
+      publishArgs = {
+        claim_id: state.report.reportId,
+        report_hash: state.hashes.report_hash,
+        evidence_hash: state.hashes.evidence_hash,
+        policy_hash: state.hashes.policy_hash,
+        // u64 as a JSON number: exactly representable by construction
+        // (see computeExpiresAt).
+        expires_at: Number(state.report.expiresAt),
+      };
     }
     const nw = fastnear();
     out.innerHTML = '<p class="muted">Waiting for the wallet to sign the publish transaction…</p>';
@@ -963,15 +1089,7 @@ async function publish() {
         {
           type: 'FunctionCall',
           methodName: 'publish_claim',
-          args: {
-            claim_id: state.report.reportId,
-            report_hash: state.hashes.report_hash,
-            evidence_hash: state.hashes.evidence_hash,
-            policy_hash: state.hashes.policy_hash,
-            // u64 as a JSON number: exactly representable by construction
-            // (see computeExpiresAt).
-            expires_at: Number(state.report.expiresAt),
-          },
+          args: publishArgs,
           gas: PUBLISH_GAS,
           deposit: PUBLISH_DEPOSIT_YOCTO,
         },

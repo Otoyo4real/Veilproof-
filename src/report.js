@@ -102,8 +102,26 @@ function requireClaimShape(claim, index) {
 // The hashed payload is the report minus the three hash fields. The
 // report built here never contains them; stripping them here means
 // hashing an annotated copy still gives the published hash.
+//
+// Derived fields are ALSO stripped from the hashed payload, by
+// design: `sampling` and the score's `riskFlags`,
+// `counterpartySummary` and `disclaimer` are deterministic functions
+// of the snapshots the evidence hash pins (the data hash covers the
+// samples and txs they are computed from). The verifier recomputes
+// them from the disclosure package and fails the report when they
+// differ (the `sampling` and `score` checks), so their integrity is
+// anchored through the evidence hash, not the report hash. Stripping
+// them keeps reports published before these fields existed verifiable
+// — their hash is unchanged when the fields are added — while a
+// report that lies about them still fails verification. The score's
+// `value`, `band` and components, and the claims, thresholds and
+// expiry, stay hashed: those are the report's own assertions.
 function hashedPayload(report) {
-  const { reportHash: _rh, evidenceHash: _eh, policyHash: _ph, ...payload } = report;
+  const { reportHash: _rh, evidenceHash: _eh, policyHash: _ph, sampling: _s, ...payload } = report;
+  if (payload.score && typeof payload.score === 'object' && !Array.isArray(payload.score)) {
+    const { riskFlags: _rf, counterpartySummary: _cs, disclaimer: _d, ...hashedScore } = payload.score;
+    payload.score = hashedScore;
+  }
   return payload;
 }
 
@@ -166,9 +184,25 @@ export function policyHash(policyVersion, policy) {
 //   primary wallet (see verify-report.js link_proofs); the addresses
 //   themselves live only in the disclosure package.
 // - score: null (not scored) or the deterministic score object from
-//   src/score.js ({ version, value, band, components }). A report
+//   src/score.js ({ version, value, band, components, riskFlags,
+//   counterpartyLabels, counterpartySummary, disclaimer }). A report
 //   without a score is honest ("not scored"); the verifier recomputes
 //   the score when one is present and fails the report when it differs.
+//   counterpartyLabels NEVER appear in the public report (they name
+//   account ids); only the label counts (counterpartySummary) do.
+// - sampling: null (omitted — no sampling evidence claimed) or the
+//   sampling record from src/sampling.js ({ intervalBlocks,
+//   sampleCount, oldestBlock, newestBlock, sampleTimestamps,
+//   lowestObservedSampledBalance, completeness, wideIntervalWarning,
+//   ... }). It is a derived summary of the pinned samples, so it is
+//   excluded from the report hash (see hashedPayload) and the
+//   verifier recomputes it from the disclosure snapshots. Note the
+//   deliberate P3 exception: the record carries the lowest OBSERVED
+//   sampled balance as an exact value — the sampling evidence is only
+//   meaningful with its observed minimum, and the sustained claim's
+//   threshold is already public. Exact claim values and score points
+//   stay stripped; this one exact value is the sampling evidence
+//   itself, cross-checked by the verifier against the pinned samples.
 // - includeExactValues (default false, P3): when false, the public
 //   report carries PREDICATES only — claims keep { id, passed,
 //   threshold } and the score keeps { version, band, components
@@ -186,6 +220,7 @@ export function buildReport({
   disclosedFields,
   linkedProverHashes = [],
   score = null,
+  sampling = null,
   includeExactValues = false,
 }) {
   requireHexHash(proverAddressHash, 'proverAddressHash');
@@ -236,11 +271,28 @@ export function buildReport({
   const publicClaims = includeExactValues
     ? disclosedClaims
     : disclosedClaims.map((c) => ({ id: c.id, passed: c.passed, threshold: c.threshold }));
+  // Public score: counterpartyLabels NEVER travel (they name account
+  // ids — see disclosure.js). Risk flags, label counts and the
+  // disclaimer are public-safe and travel with the score in both
+  // forms; the verifier recomputes them from the snapshots.
+  const publicScoreExtras =
+    score === null
+      ? {}
+      : {
+          ...(Array.isArray(score.riskFlags) ? { riskFlags: score.riskFlags } : {}),
+          ...(score.counterpartySummary && typeof score.counterpartySummary === 'object' && !Array.isArray(score.counterpartySummary)
+            ? { counterpartySummary: score.counterpartySummary }
+            : {}),
+          ...(typeof score.disclaimer === 'string' ? { disclaimer: score.disclaimer } : {}),
+        };
+  // The exact form keeps the whole score except counterpartyLabels:
+  // account ids never go in a public report, even a legacy one.
+  const { counterpartyLabels: _cl, ...exactScore } = score === null ? {} : score;
   const publicScore =
     score === null
       ? null
       : includeExactValues
-        ? score
+        ? { ...exactScore, ...publicScoreExtras }
         : {
             version: score.version,
             band: score.band,
@@ -250,6 +302,7 @@ export function buildReport({
               max: comp.max,
               measured: comp.measured,
             })),
+            ...publicScoreExtras,
           };
 
   if (!Array.isArray(linkedProverHashes) || linkedProverHashes.some((h) => !SHA256_HEX.test(h))) {
@@ -271,6 +324,67 @@ export function buildReport({
     if (!Array.isArray(score.components)) {
       throw new Error('buildReport: score.components must be an array');
     }
+    if (score.riskFlags !== undefined) {
+      if (
+        !Array.isArray(score.riskFlags) ||
+        score.riskFlags.some(
+          (f) =>
+            !f ||
+            typeof f !== 'object' ||
+            typeof f.type !== 'string' ||
+            f.type.length === 0 ||
+            typeof f.detail !== 'string' ||
+            !['low', 'medium', 'high'].includes(f.severity),
+        )
+      ) {
+        throw new Error('buildReport: score.riskFlags must be an array of { type, detail, severity } with severity low/medium/high');
+      }
+    }
+    if (score.disclaimer !== undefined && typeof score.disclaimer !== 'string') {
+      throw new Error('buildReport: score.disclaimer must be a string');
+    }
+    if (score.counterpartySummary !== undefined) {
+      const s = score.counterpartySummary;
+      if (
+        !s ||
+        typeof s !== 'object' ||
+        Array.isArray(s) ||
+        !['own', 'unknown', 'suspicious'].every((k) => Number.isInteger(s[k]) && s[k] >= 0)
+      ) {
+        throw new Error('buildReport: score.counterpartySummary must be an object with non-negative integer own/unknown/suspicious counts');
+      }
+    }
+    if (score.counterpartyLabels !== undefined && !Array.isArray(score.counterpartyLabels)) {
+      throw new Error('buildReport: score.counterpartyLabels must be an array');
+    }
+  }
+  if (sampling !== null && sampling !== undefined) {
+    if (typeof sampling !== 'object' || Array.isArray(sampling)) {
+      throw new Error('buildReport: sampling must be null or a structured object');
+    }
+    if (!Number.isInteger(sampling.sampleCount) || sampling.sampleCount < 0) {
+      throw new Error('buildReport: sampling.sampleCount must be a non-negative integer');
+    }
+    if (sampling.intervalBlocks !== null && (!Number.isInteger(sampling.intervalBlocks) || sampling.intervalBlocks < 0)) {
+      throw new Error('buildReport: sampling.intervalBlocks must be null or a non-negative integer');
+    }
+    for (const f of ['oldestBlock', 'newestBlock']) {
+      if (sampling[f] !== null && (!Number.isInteger(sampling[f]) || sampling[f] < 0)) {
+        throw new Error(`buildReport: sampling.${f} must be null or a non-negative integer`);
+      }
+    }
+    if (sampling.sampleTimestamps !== null && !Array.isArray(sampling.sampleTimestamps)) {
+      throw new Error('buildReport: sampling.sampleTimestamps must be null or an array');
+    }
+    if (sampling.lowestObservedSampledBalance !== null && typeof sampling.lowestObservedSampledBalance !== 'string') {
+      throw new Error('buildReport: sampling.lowestObservedSampledBalance must be null or a string');
+    }
+    if (typeof sampling.completeness !== 'string' || !['complete', 'partial', 'none'].includes(sampling.completeness)) {
+      throw new Error('buildReport: sampling.completeness must be complete, partial or none');
+    }
+    if (sampling.wideIntervalWarning !== null && sampling.wideIntervalWarning !== undefined && typeof sampling.wideIntervalWarning !== 'object') {
+      throw new Error('buildReport: sampling.wideIntervalWarning must be null or an object');
+    }
   }
 
   return {
@@ -285,5 +399,8 @@ export function buildReport({
     expiresAt,
     disclosed: disclosedClaims.map((c) => c.id),
     score: publicScore,
+    // Present only when the prover claims sampling evidence: a
+    // report without it keeps the old key set exactly.
+    ...(sampling === null || sampling === undefined ? {} : { sampling }),
   };
 }

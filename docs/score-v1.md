@@ -96,6 +96,17 @@ A band is a label, not a lending decision. The AI underwriter (`src/ai-analysis.
 
 score-v1 is calibrated for testnet-scale treasuries (a ~10 NEAR wallet with clean, spread-out history scores in the solid band). A mainnet-scale recalibration would ship as score-v2 with larger tier thresholds; the `version` field exists so v1 and v2 scores are never confused, and the verifier only ever recomputes the version the report declares.
 
+## Phase 3 note (2026-11-06): flags and disclaimer also apply to v1
+
+The manipulation detection in `src/manipulation.js` is version-agnostic:
+a v1 score computed with the current code also carries `riskFlags`,
+`counterpartyLabels`, `counterpartySummary` and the disclaimer, and its
+component points are unchanged — the flags are warnings, not a
+discount, under either version. See `docs/score-v2.md` (Phase 3
+section) for the detector rules, the UNKNOWN labelling and the
+flag-only diversity rule. The verifier recomputes a v1 report under
+its own declared version and compares the flags the same way.
+
 ## Recomputation recipe (for implementers)
 
 1. Take the disclosure package's snapshots (primary + linked).

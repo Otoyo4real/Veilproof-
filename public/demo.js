@@ -6,7 +6,7 @@
 // account whose address is already public in demo/history.json — so
 // showing it here leaks nothing.
 
-import { verifyReport } from './js/verify-browser.js';
+import { verifyReport, summariseVerification, buildStatusPanelsHtml, formatNearYocto } from './js/verify-browser.js';
 
 const RPC_URL = 'https://rpc.testnet.near.org';
 const REGISTRY = 'registry.veilproof.testnet';
@@ -52,9 +52,13 @@ async function rpcView(method, args) {
 }
 
 function renderDemo(result, report) {
+  // The headline is the summary of the five separate statuses, not a
+  // single VALID or INVALID: a report can pass its checks while its
+  // AI attestation stays unverified, and the banner says so.
+  const summary = summariseVerification(result);
   const banner = $('demoBanner');
-  banner.textContent = result.valid ? 'VALID, this report verifies.' : 'INVALID, this report does not verify.';
-  banner.className = 'banner ' + (result.valid ? 'valid' : 'invalid');
+  banner.textContent = summary.headline;
+  banner.className = 'banner ' + (summary.tone === 'ok' ? 'valid' : summary.tone === 'warn' ? 'warn' : 'invalid');
   $('demoChecks').innerHTML = result.checks
     .map(
       (c) =>
@@ -92,25 +96,57 @@ function renderDemo(result, report) {
           (report.aiSummary.suggestedLimitNear !== null && report.aiSummary.suggestedLimitNear !== undefined
             ? ', suggested limit ' + esc(String(report.aiSummary.suggestedLimitNear)) + ' NEAR'
             : '') +
-          ', NEAR AI Cloud, attested' + (report.aiSummary.attestation?.verifiable ? ' (nonce matched).' : '.')
-        : esc(report.aiSummary.verdict) + ', NEAR AI Cloud, attested' + (report.aiSummary.attestation?.verifiable ? ' (nonce matched).' : '.');
+          ', NEAR AI Cloud. Attestation status is in the panel below.'
+        : esc(report.aiSummary.verdict) + ', NEAR AI Cloud. Attestation status is in the panel below.';
+  // P3 predicate disclosure: the public report carries thresholds and
+  // the score band only — no exact values, no per-component points.
+  // The demo renders the public form (Claim / Passed / Threshold,
+  // band only), never an exact value. A legacy report that still
+  // carries values renders them the same way (the value is simply
+  // not shown). The components table and the score limits live in
+  // the score panel below, rendered by buildStatusPanelsHtml.
   const scoreLine = report.score
     ? '<p>Credit score: <strong>' +
       (report.score.value !== undefined
         ? esc(String(report.score.value)) + ' / 1000 (' + esc(report.score.band) + ')'
         : 'band ' + esc(report.score.band)) +
-      '</strong>, recomputable by any app from the same disclosure package.</p>' +
-      '<div class="table-scroll"><table><tr><th>Component</th><th>Max</th><th>Measured</th></tr>' +
-      report.score.components
-        .map((c) => '<tr><td>' + esc(c.label) + '</td><td>' + c.max + '</td><td>' + (c.measured ? 'yes' : 'not measured') + '</td></tr>')
-        .join('') +
-      '</table></div>'
+      '</strong>, recomputable by any app from the same disclosure package. Components and limits are in the panel below.</p>' +
+      (report.score.riskFlags && report.score.riskFlags.length > 0
+        ? '<p>Risk flags: ' +
+          report.score.riskFlags.map((f) => esc(f.type) + ' (' + esc(f.severity) + ')').join(', ') +
+          '. Details are in the score panel below.</p>'
+        : '<p>No risk flags.</p>') +
+      (report.score.disclaimer ? '<p class="muted">' + esc(report.score.disclaimer) + '</p>' : '')
     : '<p>Credit score: not scored.</p>';
+  // Sampling summary (the one exact value the public report carries
+  // by design: the lowest observed sampled balance — see
+  // src/report.js). Full sampling evidence is in the panel below.
+  const samplingLine = report.sampling
+    ? '<p>Balance sampling: ' +
+      report.sampling.sampleCount +
+      ' reading(s), interval ' +
+      (report.sampling.intervalBlocks === null ? 'n/a' : report.sampling.intervalBlocks + ' blocks') +
+      ', completeness ' +
+      esc(report.sampling.completeness) +
+      ', lowest observed sampled balance ' +
+      esc(formatNearYocto(report.sampling.lowestObservedSampledBalance)) +
+      (report.sampling.wideIntervalWarning ? ' — warning: ' + esc(report.sampling.wideIntervalWarning.message) : '') +
+      '.</p>'
+    : '<p>Balance sampling: no sampling evidence claimed.</p>';
   $('demoFacts').innerHTML =
     '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
     scoreLine +
+    samplingLine +
     '<p>AI summary: ' + ai + '</p>' +
     '<p>Expires: <span class="mono">' + esc(expires) + '</span></p>';
+  const panels = buildStatusPanelsHtml(result, report);
+  $('demoPanels').innerHTML =
+    '<h3>Verification status</h3>' + panels.summary +
+    '<h3>Privacy status</h3>' + panels.privacy +
+    '<h3>Cryptographic attestation</h3>' + panels.attestation +
+    '<h3>Report integrity</h3>' + panels.integrity +
+    '<h3>Historical sampling</h3>' + panels.sampling +
+    '<h3>Credit score limits</h3>' + panels.score;
   $('demoResult').hidden = false;
 }
 

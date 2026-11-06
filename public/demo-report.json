@@ -137,6 +137,60 @@
         "max": 50,
         "measured": true
       }
-    ]
+    ],
+    "riskFlags": [
+      {
+        "type": "concentrated_counterparty",
+        "detail": "100% of external transactions in the window (4 of 4) are with a single outside counterparty.",
+        "severity": "medium"
+      },
+      {
+        "type": "internal_transfers",
+        "detail": "1 transfer(s) between the bundle's own wallets in the window; internal transfers earn no activity, volume or diversity points.",
+        "severity": "low"
+      }
+    ],
+    "counterpartySummary": {
+      "own": 2,
+      "unknown": 0,
+      "suspicious": 1
+    },
+    "disclaimer": "This score measures observable onchain financial activity only. It is not a guarantee of repayment, identity, beneficial ownership, or creditworthiness."
+  },
+  "sampling": {
+    "windowHours": 1,
+    "intervalBlocks": 900,
+    "sampleCount": 4,
+    "oldestBlock": 276512600,
+    "newestBlock": 276515300,
+    "sampleTimestamps": [
+      {
+        "blockHeight": 276512600,
+        "timestampNs": "1793984070060846322",
+        "source": "rpc"
+      },
+      {
+        "blockHeight": 276513500,
+        "timestampNs": "1793984629083706482",
+        "source": "rpc"
+      },
+      {
+        "blockHeight": 276514400,
+        "timestampNs": "1793985178704100861",
+        "source": "rpc"
+      },
+      {
+        "blockHeight": 276515300,
+        "timestampNs": "1793985730538890117",
+        "source": "rpc"
+      }
+    ],
+    "timestampSource": "rpc",
+    "lowestObservedSampledBalance": "12647996057936901200000000",
+    "completeness": "complete",
+    "missingHeights": [],
+    "samplesRequested": 4,
+    "wideIntervalWarning": null,
+    "limitation": "Balance samples are point-in-time readings only. They show the balance at the sampled blocks; they do not prove the balance was held continuously between samples."
   }
 }

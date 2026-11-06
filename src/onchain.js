@@ -15,6 +15,7 @@
 // - Regular nodes prune old transactions (a few epochs). A tx that existed
 //   long ago may come back NOT_OBSERVED. Claims must use recent txs.
 import { createHash } from 'node:crypto';
+import { describeSampling } from './sampling.js';
 
 export const NEAR_TESTNET_RPC = 'https://rpc.testnet.near.org';
 
@@ -275,9 +276,23 @@ export function dataHashForSnapshots(snapshots) {
 // height, spaced evenly across the window (oldest first). Each reading
 // is a view_account query at that height, so the values are genuine
 // chain state a verifier can re-fetch at the same heights.
-// Throws when the account did not exist at a sampled height (the
-// account is younger than the window) or the node cannot serve that
-// height — the caller should offer a shorter window then.
+//
+// A height the node cannot serve — the account did not exist yet
+// there, or the height is pruned — is recorded in missingHeights,
+// NOT thrown: the rest of the report can still be produced honestly
+// from the readings that did come back, and the sampling record says
+// exactly which heights are missing (see describeSampling). Only a
+// run with ZERO successful readings throws: with no samples at all
+// there is nothing to sustain a claim, and the caller should offer a
+// shorter window then.
+//
+// Each returned sample also carries blockTimestampNs when the node
+// served the block header for that height (best effort — a failed
+// header lookup leaves the timestamp out, and describeSampling falls
+// back to its deterministic estimate). The timestamp is NOT part of
+// the data hash (computeMultiDataHash covers amount + blockHeight
+// only), so adding it never changes a published data hash.
+//
 // Pure helper: the block heights a balance sample covers, newest
 // last. Exported so callers sampling SEVERAL wallets compute the
 // heights ONCE and pass the same list to each — the sustained and
@@ -304,7 +319,12 @@ export function computeSampleHeights(currentBlockHeight, { windowHours, samples 
   return heights;
 }
 
-export async function sampleBalanceHistory(accountId, { windowHours, samples, heights }) {
+// The detailed sampling run: { samples, missingHeights,
+// requestedHeights, samplesRequested }. samples entries are
+// { blockHeight, amount, blockTimestampNs? } (timestamp present only
+// when the block header was served). See sampleBalanceHistory for the
+// failure policy.
+export async function sampleBalanceHistoryDetailed(accountId, { windowHours, samples, heights }) {
   if (typeof accountId !== 'string' || accountId.length === 0) {
     throw new Error('sampleBalanceHistory: accountId must be a non-empty string');
   }
@@ -326,15 +346,44 @@ export async function sampleBalanceHistory(accountId, { windowHours, samples, he
     sampleHeights = computeSampleHeights(current.blockHeight, { windowHours, samples });
   }
   const out = [];
+  const missingHeights = [];
   for (const height of sampleHeights) {
-    const result = await rpcCall('query', {
-      request_type: 'view_account',
-      account_id: accountId,
-      block_id: height,
-    });
-    out.push({ blockHeight: height, amount: String(result.amount) });
+    let result;
+    try {
+      result = await rpcCall('query', {
+        request_type: 'view_account',
+        account_id: accountId,
+        block_id: height,
+      });
+    } catch {
+      // Unservable height (account younger than the window, pruned
+      // height, node hiccup): record it and keep the readings that
+      // did come back. The sampling record carries the gap.
+      missingHeights.push(height);
+      continue;
+    }
+    const sample = { blockHeight: height, amount: String(result.amount) };
+    try {
+      const block = await rpcCall('block', { block_id: height });
+      sample.blockTimestampNs = String(block.header.timestamp_nanosec);
+    } catch {
+      // Header unavailable: the balance reading stands, and
+      // describeSampling estimates this timestamp instead.
+    }
+    out.push(sample);
   }
-  return out;
+  if (out.length === 0) {
+    throw new Error(
+      'sampleBalanceHistory: no balance samples could be read '
+      + `(account ${accountId}, ${samples} requested heights, all unservable) — try a shorter window`,
+    );
+  }
+  return { samples: out, missingHeights, requestedHeights: sampleHeights, samplesRequested: samples };
+}
+
+export async function sampleBalanceHistory(accountId, { windowHours, samples, heights }) {
+  const detailed = await sampleBalanceHistoryDetailed(accountId, { windowHours, samples, heights });
+  return detailed.samples;
 }
 
 // Fetch a full snapshot for a claim: current account state plus the
@@ -345,9 +394,12 @@ export async function sampleBalanceHistory(accountId, { windowHours, samples, he
 // duplicates are collapsed. Returned txs are sorted by hash, so the
 // snapshot (and its dataHash) is canonical.
 // opts.balanceSamples: { windowHours, samples } — when given, the
-// snapshot also carries balanceSamples (see sampleBalanceHistory) and
-// balanceSampleWindowHours, and the dataHash is computed by the
-// multi-wallet path (which covers samples) instead of computeDataHash.
+// snapshot also carries balanceSamples (see sampleBalanceHistory),
+// balanceSampleWindowHours, and a `sampling` record (see
+// describeSampling: interval, count, heights, timestamps, lowest
+// observed sampled balance, completeness). The dataHash is computed
+// by the multi-wallet path (which covers samples) instead of
+// computeDataHash.
 export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) {
   const account = await getAccount(accountId);
   const seen = new Set();
@@ -363,8 +415,18 @@ export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) 
   txs.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
   const snapshot = { account, txs, blockHeight: account.blockHeight };
   if (opts.balanceSamples) {
-    snapshot.balanceSamples = await sampleBalanceHistory(accountId, opts.balanceSamples);
+    const detailed = await sampleBalanceHistoryDetailed(accountId, opts.balanceSamples);
+    snapshot.balanceSamples = detailed.samples;
     snapshot.balanceSampleWindowHours = opts.balanceSamples.windowHours;
+    // The sampling record: full evidence about what was observed
+    // (interval, count, heights, timestamps, lowest observed sampled
+    // balance, completeness). It is derived from the pinned samples,
+    // so the verifier recomputes it from the disclosure and compares.
+    snapshot.sampling = describeSampling(snapshot, {
+      samplesRequested: detailed.samplesRequested,
+      requestedHeights: detailed.requestedHeights,
+      missingHeights: detailed.missingHeights,
+    });
   }
   snapshot.dataHash = dataHashForSnapshots([snapshot]);
   return snapshot;

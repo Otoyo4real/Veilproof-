@@ -178,5 +178,13 @@ test('demo.js renders the public predicate report, never an exact value', () => 
   assert.ok(!demoJs.includes("c.points + ' / '"), 'demo must not render per-component points');
   assert.ok(demoJs.includes('<th>Claim</th><th>Passed</th><th>Threshold</th>'), 'demo claims table must be Claim / Passed / Threshold');
   assert.ok(demoJs.includes("band ' + esc(report.score.band)"), 'demo score must show the band when no value is present');
-  assert.ok(demoJs.includes('<th>Component</th><th>Max</th><th>Measured</th>'), 'demo score table must be Component / Max / Measured');
+  // The Component / Max / Measured table moved out of demo.js into the
+  // score panel built by verify-browser.js (and mirrored in verify.html).
+});
+
+test('score panel owns the Component / Max / Measured table', () => {
+  const builder = readFileSync(new URL('../public/js/verify-browser.js', import.meta.url), 'utf8');
+  const page = readFileSync(new URL('../public/verify.html', import.meta.url), 'utf8');
+  assert.ok(builder.includes('<th>Component</th><th>Max</th><th>Measured</th>'), 'browser builder score table must be Component / Max / Measured');
+  assert.ok(page.includes('<th>Component</th><th>Max</th><th>Measured</th>'), 'page builder score table must be Component / Max / Measured');
 });

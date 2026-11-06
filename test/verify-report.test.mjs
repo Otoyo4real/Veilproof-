@@ -29,7 +29,7 @@ const POLICY = {
   volumeWindowDays: 30,
   noFailedWindowDays: 30,
 };
-const CHECK_ORDER = ['prover_binding', 'report_hash', 'evidence_hash', 'policy_hash', 'data_hash', 'claims', 'score', 'link_proofs', 'validity'];
+const CHECK_ORDER = ['prover_binding', 'report_hash', 'evidence_hash', 'policy_hash', 'data_hash', 'sampling', 'claims', 'score', 'link_proofs', 'validity'];
 
 function sha256Hex(s) {
   return createHash('sha256').update(s, 'utf8').digest('hex');
@@ -646,7 +646,7 @@ function saltedGenuine() {
   };
 }
 
-test('verify salted: a fresh-salt report verifies valid, all 9 checks pass', () => {
+test('verify salted: a fresh-salt report verifies valid, all 10 checks pass', () => {
   const g = saltedGenuine();
   const result = verifyReport({
     report: g.report,

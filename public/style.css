@@ -354,7 +354,27 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; colo
   border: 1px solid transparent;
 }
 .banner.valid { background: var(--ok-bg); color: #166534; border-color: var(--ok-line); }
+.banner.warn { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-line); }
 .banner.invalid { background: var(--err-bg); color: #991b1b; border-color: var(--err-line); }
+.status-row { padding: 0.6rem 0; border-bottom: 1px solid var(--line); }
+.status-row:last-child { border-bottom: 0; }
+.status-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.status-head strong { font-size: 1rem; }
+.pill {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.pill.ok { color: #166534; background: var(--ok-bg); border-color: var(--ok-line); }
+.pill.warn { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-line); }
+.pill.bad { color: #991b1b; background: var(--err-bg); border-color: var(--err-line); }
+.status-detail { color: var(--muted); font-size: 0.9rem; margin-top: 0.25rem; }
+.status-notes p { font-size: 0.92rem; margin-bottom: 0.5rem; }
 .check { padding: 0.6rem 0; border-bottom: 1px solid var(--line); }
 .check .mark { font-weight: 700; }
 .check.pass .mark { color: var(--ok); }

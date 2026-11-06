@@ -116,7 +116,7 @@ test('malformed claims are a 400, not a 500', async () => {
   });
 });
 
-test('ok path: attested summary passes through, and junk address/tx fields in metrics never reach the model', async () => {
+test('ok path: UNVERIFIED summary (echo-only evidence) passes through, and junk address/tx fields in metrics never reach the model', async () => {
   await withKey('fake-key-for-test', async () => {
     let capturedCompletionBody = null;
     const stub = async (url, init) => {
@@ -126,9 +126,9 @@ test('ok path: attested summary passes through, and junk address/tx fields in me
       }
       if (String(url).includes('/chat/completions')) {
         capturedCompletionBody = String(init.body);
-        return {
-          ok: true,
-          json: async () => ({
+        const responseBytes = Buffer.from(
+          JSON.stringify({
+            id: 'chatcmpl-route-test',
             choices: [
               {
                 message: {
@@ -140,6 +140,12 @@ test('ok path: attested summary passes through, and junk address/tx fields in me
               },
             ],
           }),
+          'utf8',
+        );
+        return {
+          ok: true,
+          arrayBuffer: async () => responseBytes.buffer.slice(responseBytes.byteOffset, responseBytes.byteOffset + responseBytes.byteLength),
+          json: async () => JSON.parse(responseBytes.toString('utf8')),
         };
       }
       throw new Error(`unexpected fetch to ${url}`);
@@ -161,8 +167,11 @@ test('ok path: attested summary passes through, and junk address/tx fields in me
       assert.equal(res.body.status, 'ok');
       assert.equal(res.body.summary.provider, 'near-ai');
       assert.equal(res.body.summary.verdict, 'consistent');
-      assert.equal(res.body.summary.attestation.verifiable, true);
-      assert.equal(res.body.summary.attestation.nonceMatched, true);
+      // Echo-only evidence is UNVERIFIED now: a nonce echo is never
+      // VERIFIED. The summary still returns, honestly labelled.
+      assert.equal(res.body.summary.attestation.status, 'UNVERIFIED');
+      assert.equal(res.body.summary.attestation.verifiable, false);
+      assert.equal(res.body.summary.attestation.nonceMatched, false);
       assert.match(res.body.summary.attestation.ref, /^[0-9a-f]{64}$/);
       // The model request carried none of the private fields.
       assert.ok(capturedCompletionBody !== null, 'completion was called');
@@ -211,10 +220,15 @@ function underwriteStub() {
       const nonce = new URL(url).searchParams.get('nonce');
       return { ok: true, status: 200, json: async () => ({ gateway_attestation: { request_nonce: nonce } }) };
     }
+    const responseBytes = Buffer.from(
+      JSON.stringify({ id: 'chatcmpl-route-test', choices: [{ message: { content: UNDERWRITE_CONTENT } }] }),
+      'utf8',
+    );
     return {
       ok: true,
       status: 200,
-      json: async () => ({ choices: [{ message: { content: UNDERWRITE_CONTENT } }] }),
+      arrayBuffer: async () => responseBytes.buffer.slice(responseBytes.byteOffset, responseBytes.byteOffset + responseBytes.byteLength),
+      json: async () => JSON.parse(responseBytes.toString('utf8')),
     };
   };
 }

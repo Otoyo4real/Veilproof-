@@ -25,6 +25,11 @@ import { analyseClaims } from '../src/ai-analysis.js';
 import { buildReport, reportHash, evidenceHash, policyHash } from '../src/report.js';
 import { buildDisclosurePackage, assertPublicReportClean } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
+// Registry v2 (commitments, allowlisted publisher): this script probes
+// the registry version and uses the v1 flow (demo wallet signs, owner
+// asserted) or the v2 flow (dedicated publisher signs and revokes,
+// publisher commitment asserted). See docs/contract-migration.md.
+import { probeContractVersion, isV2Version, buildV2PublishArgs } from '../src/registry.js';
 
 const REGISTRY_ID = 'registry.veilproof.testnet';
 const DEMO_ACCOUNT = 'veilproof-demo.testnet';
@@ -192,7 +197,8 @@ async function main() {
   results.report = report;
   results.hashes = hashes;
 
-  // --- Step 5: publish the hashes onchain (signed, demo wallet).
+  // --- Step 5: publish the hashes onchain (signed, demo wallet on v1;
+  // dedicated publisher account on v2 — see the version probe below).
   step('Publish hashes to registry.veilproof.testnet (demo step 8)');
   info(`cost preview: attached deposit 0.01 NEAR, gas limit 100 TGas; contract charges storage at cost (~0.003-0.005 NEAR) and refunds the excess; gas actually used is paid`);
   const keyStore = new keyStores.InMemoryKeyStore();
@@ -205,18 +211,54 @@ async function main() {
     keyStore,
   });
   const demoAccount = await near.account(DEMO_ACCOUNT);
-  const balanceBefore = (await demoAccount.getAccountBalance()).available;
-  info(`demo wallet balance before publish: ${fmtNear(balanceBefore)} NEAR`);
-  const publishResult = await demoAccount.functionCall({
+  // Registry version probe: v1 has no get_version (null) and records the
+  // demo wallet as owner; v2 publishes from the dedicated publisher
+  // account and records only a salted publisher commitment.
+  const registryVersion = await probeContractVersion(
+    (method, args) => demoAccount.viewFunction({ contractId: REGISTRY_ID, methodName: method, args }),
+  );
+  const registryIsV2 = isV2Version(registryVersion);
+  info(`registry version: ${registryVersion ?? 'v1 (no get_version)'}`);
+  let signerAccount = demoAccount;
+  let publishArgs = {
+    claim_id: report.reportId,
+    report_hash: hashes.report_hash,
+    evidence_hash: hashes.evidence_hash,
+    policy_hash: hashes.policy_hash,
+    expires_at: Number(expiresAt),
+  };
+  let expectedPublisherCommitment = null;
+  if (registryIsV2) {
+    const publisherEntry = accounts.publisher;
+    check(
+      publisherEntry && typeof publisherEntry.accountId === 'string' && typeof publisherEntry.privateKey === 'string',
+      'registry is v2 but no "publisher" account in .testnet-accounts.json — create the dedicated publisher account first (docs/contract-migration.md)',
+    );
+    await keyStore.setKey('testnet', publisherEntry.accountId, KeyPair.fromString(publisherEntry.privateKey));
+    signerAccount = await near.account(publisherEntry.accountId);
+    // The publisher is its own controller here; the treasury (demo
+    // wallet) is neither publisher nor controller.
+    const built = buildV2PublishArgs({
+      claimId: report.reportId,
+      reportHash: hashes.report_hash,
+      evidenceHash: hashes.evidence_hash,
+      policyHash: hashes.policy_hash,
+      expiresAt: Number(expiresAt),
+      publisherAccountId: publisherEntry.accountId,
+      controllerAccountId: publisherEntry.accountId,
+    });
+    publishArgs = built.args;
+    expectedPublisherCommitment = built.commitments.publisher_commitment;
+    info(`v2 publish: signer ${publisherEntry.accountId} (dedicated publisher, controller itself)`);
+  } else {
+    info(`v1 publish: signer ${DEMO_ACCOUNT} (demo wallet, recorded as owner)`);
+  }
+  const balanceBefore = (await signerAccount.getAccountBalance()).available;
+  info(`signer balance before publish: ${fmtNear(balanceBefore)} NEAR`);
+  const publishResult = await signerAccount.functionCall({
     contractId: REGISTRY_ID,
     methodName: 'publish_claim',
-    args: {
-      claim_id: report.reportId,
-      report_hash: hashes.report_hash,
-      evidence_hash: hashes.evidence_hash,
-      policy_hash: hashes.policy_hash,
-      expires_at: Number(expiresAt),
-    },
+    args: publishArgs,
     gas: PUBLISH_GAS,
     attachedDeposit: PUBLISH_DEPOSIT_YOCTO,
   });
@@ -224,8 +266,8 @@ async function main() {
   check(typeof publishTxHash === 'string' && publishTxHash.length > 0, 'publish returned no transaction hash');
   info(`publish tx: ${publishTxHash}`);
   info(`explorer: https://testnet.nearblocks.io/txns/${publishTxHash}`);
-  const balanceAfter = (await demoAccount.getAccountBalance()).available;
-  info(`demo wallet balance after publish: ${fmtNear(balanceAfter)} NEAR (net cost ${fmtNear(BigInt(balanceBefore) - BigInt(balanceAfter))} NEAR incl. gas)`);
+  const balanceAfter = (await signerAccount.getAccountBalance()).available;
+  info(`signer balance after publish: ${fmtNear(balanceAfter)} NEAR (net cost ${fmtNear(BigInt(balanceBefore) - BigInt(balanceAfter))} NEAR incl. gas)`);
   ok(`publish_claim executed, tx ${publishTxHash}`);
   results.publishTxHash = publishTxHash;
 
@@ -237,7 +279,12 @@ async function main() {
     args: { claim_id: report.reportId },
   });
   check(claim !== null, 'get_claim returned null right after publish');
-  check(claim.owner === DEMO_ACCOUNT, `onchain owner ${claim.owner} is not the demo wallet`);
+  if (registryIsV2) {
+    check(!('owner' in claim), 'v2 get_claim still returns an owner field');
+    check(claim.publisher_commitment === expectedPublisherCommitment, `onchain publisher_commitment ${claim.publisher_commitment} does not match the expected commitment`);
+  } else {
+    check(claim.owner === DEMO_ACCOUNT, `onchain owner ${claim.owner} is not the demo wallet`);
+  }
   check(claim.report_hash === hashes.report_hash, 'onchain report_hash differs from the published hash');
   check(claim.evidence_hash === hashes.evidence_hash, 'onchain evidence_hash differs from the published hash');
   check(claim.policy_hash === hashes.policy_hash, 'onchain policy_hash differs from the published hash');
@@ -248,7 +295,9 @@ async function main() {
     args: { claim_id: report.reportId },
   });
   check(valid === true, `is_claim_valid is ${valid}, expected true`);
-  info(`onchain record: owner ${claim.owner} | revoked ${claim.revoked} | expires_at ${claim.expires_at}`);
+  info(registryIsV2
+    ? `onchain record: publisher_commitment ${claim.publisher_commitment.slice(0, 16)}… | revoked ${claim.revoked} | expires_at ${claim.expires_at}`
+    : `onchain record: owner ${claim.owner} | revoked ${claim.revoked} | expires_at ${claim.expires_at}`);
   const verified = verifyReport({
     report,
     onchainRecord: { ...claim, valid },
@@ -290,7 +339,10 @@ async function main() {
 
   // --- Step 7b: revoke the claim; verification must then FAIL on validity.
   step('Negative check (b): revoke the claim, then verification must fail (demo step 13)');
-  const revokeResult = await demoAccount.functionCall({
+  // Revoke as the claim's controller: the demo wallet on v1, the
+  // dedicated publisher (its own controller) on v2.
+  const revokerAccount = registryIsV2 ? signerAccount : demoAccount;
+  const revokeResult = await revokerAccount.functionCall({
     contractId: REGISTRY_ID,
     methodName: 'revoke_claim',
     args: { claim_id: report.reportId },
@@ -334,7 +386,9 @@ async function main() {
     publishTxHash,
     revokeTxHash,
     registry: REGISTRY_ID,
-    owner: claim.owner,
+    registryVersion: registryVersion ?? 'v1',
+    owner: claim.owner ?? null,
+    publisherCommitment: claim.publisher_commitment ?? null,
     onchainRecord: claimAfterRevoke,
     hashes,
     verifyChecks: verified.checks.map((c) => ({ check: c.check, passed: c.passed })),

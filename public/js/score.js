@@ -54,6 +54,36 @@
 // 100), down from 920 under v1, while an honest treasury barely
 // moves (the demo: 790 v1 -> 770 v2).
 //
+// Manipulation detection (score-v2, see src/manipulation.js): the
+// score never sees identity, so it cannot tell a sock-puppet from a
+// stranger — but it can see pattern. computeScore runs the detectors
+// over the tx window and returns their findings alongside the points:
+// - riskFlags: [{ type, detail, severity }] — circular flows and
+//   chains, shared funders, concentrated counterparties, repeated
+//   transfers, internal transfers. Advisory only: flags never change
+//   the points. Diversity earned from a flagged counterparty is
+//   FLAGGED, not discounted — discounting would change published
+//   scores, and a future score-v3 may discount; v2 only flags.
+// - counterpartyLabels: [{ account, label }] — 'own' for bundle
+//   wallets, 'suspicious' for an outside account that appears in a
+//   medium/high flag, 'unknown' for every other outside account.
+//   UNKNOWN means "no identity or ownership evidence exists, so
+//   independence is NOT assumed" — diversity counts distinct
+//   accounts, not proven-independent counterparties.
+// - disclaimer: the score measures observable onchain activity only;
+//   it is not a guarantee of repayment, identity, beneficial
+//   ownership, or creditworthiness.
+// Detection runs only when txWindowDays is supplied (it needs the
+// window); otherwise riskFlags and counterpartyLabels are empty.
+//
+// NOTE on labels: the component labels below are part of published
+// reports' onchain-pinned hashes, so they are not renamed lightly.
+// 'Lowest sampled balance held' already says "sampled", never
+// "continuously held" — the honest "lowest OBSERVED sampled balance"
+// wording lives in the sampling record (src/sampling.js) and the
+// docs, and no claim or label here describes a sampled balance as
+// maintained between samples.
+//
 // score-v1 (kept for old reports — the verifier recomputes a report
 // under its own version, so v1 reports still verify exactly): the
 // same six components, but activity is max 200 (0: 0; 1–2: 40; 3–9:
@@ -80,6 +110,12 @@ import {
   aggregateStaked,
   sampleSums,
 } from './claims-engine.js';
+import {
+  SCORE_DISCLAIMER,
+  detectRiskFlags,
+  labelCounterparties,
+  counterpartySummary,
+} from './manipulation.js';
 
 export const SCORE_VERSION = 'score-v2';
 export const SCORE_MAX = 1000;
@@ -166,7 +202,9 @@ function countTierPoints(count, tiers) {
 // window is supplied. version is 'score-v2' by default; pass
 // 'score-v1' to recompute an old report under its own rules (the
 // verifier does this from report.score.version). Returns
-// { version, value, band, components: [{ id, label, points, max, measured }] }.
+// { version, value, band, components: [{ id, label, points, max,
+// measured }], riskFlags, counterpartyLabels, counterpartySummary,
+// disclaimer }.
 export function computeScore(snapshotOrBundle, opts = {}, nowNs, version = SCORE_VERSION) {
   const rules = SCORE_RULES[version];
   if (!rules) {
@@ -277,6 +315,25 @@ export function computeScore(snapshotOrBundle, opts = {}, nowNs, version = SCORE
   // Staked: always measurable from the accounts themselves.
   push('staked', 'Staked balance held', aggregateStaked(wallets) > 0n ? 50 : 0, 50, true);
 
+  // Manipulation detection over the tx window (advisory: flags never
+  // change the points). Unassessed when no tx window was supplied.
+  const assessed = windows.txWindowDays !== undefined && now !== null;
+  const riskFlags = assessed
+    ? detectRiskFlags(snapshotOrBundle, { txWindowDays: windows.txWindowDays, nowNs }).flags
+    : [];
+  const labels = assessed
+    ? labelCounterparties(snapshotOrBundle, { txWindowDays: windows.txWindowDays, nowNs })
+    : [];
+
   const value = components.reduce((sum, c) => sum + c.points, 0);
-  return { version, value, band: bandFor(value), components };
+  return {
+    version,
+    value,
+    band: bandFor(value),
+    components,
+    riskFlags,
+    counterpartyLabels: labels,
+    counterpartySummary: counterpartySummary(labels),
+    disclaimer: SCORE_DISCLAIMER,
+  };
 }

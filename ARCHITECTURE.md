@@ -31,11 +31,22 @@
    version, AI summary, evidence refs, expiry. SHA-256 report hash,
    evidence hash, policy hash. No address, no amounts in the public report
    beyond the threshold claims the prover chose to disclose.
-6. **Registry contract** (`contract/`) — `veilproof_registry`:
-   `publish_claim`, `get_claim`, `revoke_claim`, `get_owner_claims`,
-   `is_claim_valid`. Stores only: claim id, owner, report hash, evidence
-   hash, policy hash, created, expiry, revoked. Duplicate ids rejected,
-   only the owner can revoke or publish for themselves, expiry enforced.
+6. **Registry contract** (`contract/`) — `veilproof_registry` v2:
+   `publish_claim`, `get_claim`, `revoke_claim`, `is_claim_valid`,
+   plus `get_version`, `get_admin`, `is_authorized_publisher`,
+   `list_publishers`, `get_limits`, `get_total_claims`,
+   `get_controller_claim_count`, `add_publisher`,
+   `remove_publisher`, `migrate`. Stores only: claim id, salted
+   publisher and controller commitments + salt, report hash, evidence
+   hash, policy hash, created, expiry, revoked — no account id of any
+   kind. Publishing is allowlist-only (a dedicated publisher account,
+   never a treasury); revocation is controller-only via the salted
+   commitment. Duplicate ids rejected, claim ids are printable ASCII
+   only, expiry is 1 hour to 365 days, caps are 100 claims per
+   controller and 10,000 total. `get_owner_claims` is removed in v2;
+   there is no enumeration. Migration from the deployed v1 registry
+   is an in-place `migrate()` call — see
+   `docs/contract-migration.md` (plan only, not executed).
 7. **Selective disclosure** — the disclosure package (address + data + data
    hash) travels privately to the verifier the prover chose. Revocation stops
    future access; it cannot erase what a verifier already downloaded.

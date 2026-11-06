@@ -61,23 +61,63 @@
     "balanceSamples": [
       {
         "blockHeight": 276512600,
-        "amount": "11148040694449401200000000"
+        "amount": "11148040694449401200000000",
+        "blockTimestampNs": "1793984070060846322"
       },
       {
         "blockHeight": 276513500,
-        "amount": "11148040694449401200000000"
+        "amount": "11148040694449401200000000",
+        "blockTimestampNs": "1793984629083706482"
       },
       {
         "blockHeight": 276514400,
-        "amount": "11148040694449401200000000"
+        "amount": "11148040694449401200000000",
+        "blockTimestampNs": "1793985178704100861"
       },
       {
         "blockHeight": 276515300,
-        "amount": "11148040694449401200000000"
+        "amount": "11148040694449401200000000",
+        "blockTimestampNs": "1793985730538890117"
       }
     ],
     "balanceSampleWindowHours": 1,
-    "dataHash": "5789e16242468141c8785e82d52161710f2062e6feb4f44e495329dc2ebfbf06"
+    "dataHash": "5789e16242468141c8785e82d52161710f2062e6feb4f44e495329dc2ebfbf06",
+    "sampling": {
+      "windowHours": 1,
+      "intervalBlocks": 900,
+      "sampleCount": 4,
+      "oldestBlock": 276512600,
+      "newestBlock": 276515300,
+      "sampleTimestamps": [
+        {
+          "blockHeight": 276512600,
+          "timestampNs": "1793984070060846322",
+          "source": "rpc"
+        },
+        {
+          "blockHeight": 276513500,
+          "timestampNs": "1793984629083706482",
+          "source": "rpc"
+        },
+        {
+          "blockHeight": 276514400,
+          "timestampNs": "1793985178704100861",
+          "source": "rpc"
+        },
+        {
+          "blockHeight": 276515300,
+          "timestampNs": "1793985730538890117",
+          "source": "rpc"
+        }
+      ],
+      "timestampSource": "rpc",
+      "lowestObservedSampledBalance": "11148040694449401200000000",
+      "completeness": "complete",
+      "missingHeights": [],
+      "samplesRequested": 4,
+      "wideIntervalWarning": null,
+      "limitation": "Balance samples are point-in-time readings only. They show the balance at the sampled blocks; they do not prove the balance was held continuously between samples."
+    }
   },
   "salt": "e051737285cb7601ef5e809181b8f7d5",
   "linked": [
@@ -107,23 +147,63 @@
         "balanceSamples": [
           {
             "blockHeight": 276512600,
-            "amount": "1499955363487500000000000"
+            "amount": "1499955363487500000000000",
+            "blockTimestampNs": "1793984070060846322"
           },
           {
             "blockHeight": 276513500,
-            "amount": "1499955363487500000000000"
+            "amount": "1499955363487500000000000",
+            "blockTimestampNs": "1793984629083706482"
           },
           {
             "blockHeight": 276514400,
-            "amount": "1499955363487500000000000"
+            "amount": "1499955363487500000000000",
+            "blockTimestampNs": "1793985178704100861"
           },
           {
             "blockHeight": 276515300,
-            "amount": "1499955363487500000000000"
+            "amount": "1499955363487500000000000",
+            "blockTimestampNs": "1793985730538890117"
           }
         ],
         "balanceSampleWindowHours": 1,
-        "dataHash": "5a89e94c792fa943a256caa64da6a45690b732e60969ed87959c0039135c1caa"
+        "dataHash": "5a89e94c792fa943a256caa64da6a45690b732e60969ed87959c0039135c1caa",
+        "sampling": {
+          "windowHours": 1,
+          "intervalBlocks": 900,
+          "sampleCount": 4,
+          "oldestBlock": 276512600,
+          "newestBlock": 276515300,
+          "sampleTimestamps": [
+            {
+              "blockHeight": 276512600,
+              "timestampNs": "1793984070060846322",
+              "source": "rpc"
+            },
+            {
+              "blockHeight": 276513500,
+              "timestampNs": "1793984629083706482",
+              "source": "rpc"
+            },
+            {
+              "blockHeight": 276514400,
+              "timestampNs": "1793985178704100861",
+              "source": "rpc"
+            },
+            {
+              "blockHeight": 276515300,
+              "timestampNs": "1793985730538890117",
+              "source": "rpc"
+            }
+          ],
+          "timestampSource": "rpc",
+          "lowestObservedSampledBalance": "1499955363487500000000000",
+          "completeness": "complete",
+          "missingHeights": [],
+          "samplesRequested": 4,
+          "wideIntervalWarning": null,
+          "limitation": "Balance samples are point-in-time readings only. They show the balance at the sampled blocks; they do not prove the balance was held continuously between samples."
+        }
       },
       "salt": "f15c45c8080b1ed8a583f90dd4d984eb"
     }

@@ -3,14 +3,17 @@
 // These assert the DESIRED properties: 0 address recoveries, linking
 // no better than chance, and balance/score estimates that are bounds,
 // not exact values. They FAIL while the leaks exist (P1's "before"
-// measurement) and PASS once P2 (salts) and P3 (predicates) fix them.
-// A failing test here is a finding, not a broken feature — see
-// docs/privacy-audit.md for the before/after table.
+// measurement) and PASS once P2 (salts), P3 (predicates) and the v2
+// registry (commitments, no owner field) fix them. A failing test
+// here is a finding, not a broken feature — see docs/privacy-audit.md
+// for the before/after table.
 //
-// The registry-owner linking test is different: the owner field is
-// public by design (revocation needs an owner), so salts cannot fix
-// it. That test asserts the audit MEASURES and REPORTS it, so the
-// limit can never be silently dropped.
+// The registry-linking test changed with v2: there is no owner field
+// any more, so the test asserts the audit's registry attack finds NO
+// linkable groups at all (per-claim salted publisher commitments
+// yield singletons) and that the audit still reports the residual
+// offchain correlation (public transaction history) in its note,
+// so the limit can never be silently dropped.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runAudit } from '../scripts/privacy-audit.mjs';
@@ -48,14 +51,25 @@ test('audit: balance and score estimates from the public report are bounds, not 
   );
 });
 
-test('audit: the registry-owner linking limit is measured and reported, never hidden', () => {
+test('audit: the registry offers no linking vector (v2 commitments are per-claim salted)', () => {
   const r = runAudit();
-  assert.ok(
-    typeof r.linkingByOwner.precision === 'number',
-    'audit must report the owner-field linking precision',
+  assert.equal(
+    r.linkingByRegistry.predictedPairs,
+    0,
+    `registry attack predicted ${r.linkingByRegistry.predictedPairs} same-publisher pairs — commitments must be unlinkable`,
+  );
+  assert.equal(
+    r.linkingByRegistry.precision,
+    null,
+    'registry linking precision must be null (no groups at all), not a number',
   );
   assert.ok(
-    typeof r.linkingByOwner.note === 'string' && r.linkingByOwner.note.length > 0,
-    'audit must carry the documented-limit note for owner-field linking',
+    typeof r.linkingByRegistry.note === 'string' && r.linkingByRegistry.note.length > 0,
+    'audit must carry the residual-correlation note for the registry (public tx history)',
+  );
+  assert.match(
+    r.linkingByRegistry.note,
+    /transaction/,
+    'the residual-correlation note must name public transaction history as the remaining vector',
   );
 });

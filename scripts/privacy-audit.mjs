@@ -3,17 +3,18 @@
 //   npm run audit
 //
 // The attacker receives ONLY public data: the public reports, the
-// registry's public views (get_claim / get_owner_claims), and public
-// API responses (the committed demo report). It never sees an address,
-// a snapshot, or a disclosure package — anything it recovers came
-// from public data alone.
+// registry's public views (get_claim — v2 carries hashes and salted
+// commitments only, no owner field, and get_owner_claims is gone),
+// and public API responses (the committed demo report). It never sees
+// an address, a snapshot, or a disclosure package — anything it
+// recovers came from public data alone.
 //
 // Three attacks, over 50 simulated provers (2 reports each, 100 total):
 //   (a) address recovery — hash a dictionary of plausible names and
 //       compare with the prover commitments.
 //   (b) linking — group reports by identical prover commitment, and
-//       separately by the registry's public owner field, and measure
-//       pairwise precision against the chance baseline.
+//       separately by the registry's public publisher commitment, and
+//       measure pairwise precision against the chance baseline.
 //   (c) balance / score estimation — read the best estimate of the
 //       exact aggregate balance and exact score from the public
 //       report, and measure the error against the true values.
@@ -23,15 +24,23 @@
 // test/privacy-audit.test.mjs are the gate — they assert 0 address
 // recoveries and linking no better than chance, and they fail while
 // the leaks below exist. That failure IS the before/after evidence:
-// fix the leak (P2 salts, P3 predicates), re-run, watch them pass.
+// fix the leak (P2 salts, P3 predicates, v2 registry commitments),
+// re-run, watch them pass.
 //
 // Deterministic: a seeded RNG, so the same run gives the same table.
+//
+// v2 note: the simulated registry below models the v2 contract
+// (contract/src/lib.rs 2.0.0). The DEPLOYED registry is still v1 until
+// the migration in docs/contract-migration.md runs — its owner field
+// is a live leak until then, measured in the v1 rows of
+// docs/privacy-audit.md, not by this script.
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import { computeDataHash } from '../src/onchain.js';
 import { buildReport, newProverSalt, saltedAddressHash } from '../src/report.js';
+import { commitmentHex, newCommitmentSalt, PUBLISHER_COMMITMENT_DOMAIN } from '../src/registry.js';
 
 const NEAR = 10n ** 24n;
 const NOW_NS = 1793961600000000000n;
@@ -167,27 +176,33 @@ function makeReport(rng, address, balanceNear) {
   return { address, salt, snapshot: snap, report, score, aggregateBalance: BigInt(snap.account.amount) };
 }
 
-// Simulated registry: the attacker's only view is get_claim (which
-// returns the record INCLUDING the owner account) and get_owner_claims
-// (all claim ids for an owner, in publication order) — exactly the
-// real contract's public views.
+// Simulated registry (v2 model): the attacker's only view is
+// get_claim, which returns hashes and a per-claim salted publisher
+// commitment — no owner account, no enumeration. The publisher is ONE
+// shared dedicated account for every claim (the real v2 model: a
+// single publisher.veilproof.testnet signs everything), and each
+// claim's commitment uses its own fresh salt, so two claims from the
+// same publisher still carry different commitments. Grouping by
+// commitment must therefore yield singletons even though the signer
+// is the same account throughout.
+const SIMULATED_PUBLISHER = 'publisher.veilproof.testnet';
 function simulateRegistry(published) {
   const claims = new Map();
-  const ownerClaims = new Map();
   for (const p of published) {
+    // Commitment salt: fresh 64-hex per claim (newCommitmentSalt), NOT
+    // the report's 32-hex prover salt — the contract requires 64-hex.
+    const salt = newCommitmentSalt();
     claims.set(p.report.reportId, {
       claim_id: p.report.reportId,
-      owner: p.address,
+      publisher_commitment: commitmentHex(PUBLISHER_COMMITMENT_DOMAIN, salt, SIMULATED_PUBLISHER),
       report_hash: 'hash',
       evidence_hash: 'hash',
       policy_hash: 'hash',
       expires_at: p.report.expiresAt,
       valid: true,
     });
-    if (!ownerClaims.has(p.address)) ownerClaims.set(p.address, []);
-    ownerClaims.get(p.address).push(p.report.reportId);
   }
-  return { claims, ownerClaims };
+  return { claims };
 }
 
 // Attack (a): dictionary recovery of prover commitments.
@@ -277,10 +292,15 @@ export function runAudit() {
     byCommitment.get(p.report.prover).push(p.report.reportId);
   }
   const commitLink = linkingStats(byCommitment, (id) => truthByReport.get(id));
-  // Linking via the registry's public owner field.
-  const byOwner = new Map();
-  for (const [owner, ids] of registry.ownerClaims) byOwner.set(owner, ids);
-  const ownerLink = linkingStats(byOwner, (id) => truthByReport.get(id));
+  // Linking via the registry's public publisher commitment. v2
+  // commitments are salted per claim, so every group is a singleton
+  // and precision is null (no predicted pairs at all).
+  const byPublisherCommitment = new Map();
+  for (const [id, claim] of registry.claims) {
+    if (!byPublisherCommitment.has(claim.publisher_commitment)) byPublisherCommitment.set(claim.publisher_commitment, []);
+    byPublisherCommitment.get(claim.publisher_commitment).push(id);
+  }
+  const registryLink = linkingStats(byPublisherCommitment, (id) => truthByReport.get(id));
   // Chance baseline: same-prover pairs / all pairs.
   const totalPairs = (reports.length * (reports.length - 1)) / 2;
   const truePairs = provers.length; // 2 reports each -> 1 pair per prover
@@ -328,6 +348,7 @@ export function runAudit() {
   const leaks = [];
   if (recovered.size > 0) leaks.push('address recovery');
   if (commitLink.precision !== null && commitLink.precision > chance) leaks.push('linking via commitments');
+  if (registryLink.precision !== null && registryLink.precision > chance) leaks.push('linking via registry commitments');
   if (balanceN > 0 && balanceErr / balanceN < 1) leaks.push('exact balance from public report');
   if (scoreN > 0 && scoreErr / scoreN < 1) leaks.push('exact score from public report');
 
@@ -349,13 +370,13 @@ export function runAudit() {
       chance,
       betterThanChance: commitLink.precision !== null && commitLink.precision > chance,
     },
-    linkingByOwner: {
-      predictedPairs: ownerLink.predicted,
-      truePairs: ownerLink.truePredicted,
-      precision: ownerLink.precision,
+    linkingByRegistry: {
+      predictedPairs: registryLink.predicted,
+      truePairs: registryLink.truePredicted,
+      precision: registryLink.precision,
       chance,
-      betterThanChance: ownerLink.precision !== null && ownerLink.precision > chance,
-      note: 'The registry owner field is public by design (revocation needs an owner). Salts do not fix this; see docs/privacy-audit.md.',
+      betterThanChance: registryLink.precision !== null && registryLink.precision > chance,
+      note: 'v2: get_claim returns a per-claim salted publisher commitment (fresh salt per claim) and no owner field; get_owner_claims is removed. Grouping by commitment yields singletons, so no pairs are predicted at all. The remaining registry-level correlation is offchain: NEAR transaction senders and history are public (see docs/privacy-audit.md).',
     },
     balanceEstimation: { meanAbsPctError: balanceN ? balanceErr / balanceN : null, n: balanceN },
     scoreEstimation: { meanAbsPctError: scoreN ? scoreErr / scoreN : null, n: scoreN },
@@ -384,8 +405,8 @@ if (isMain) {
   console.log(`(a) Address recovery (dictionary)     ${a.recovered}/${a.of} recovered  ${a.randomRecovered}/${a.randomOf} random, ${a.dictionaryRecovered}/${a.dictionaryOf} named  ${a.recovered === 0 ? 'PASS' : 'LEAK'}`);
   const l = r.linkingByCommitment;
   console.log(`(b) Linking via prover commitment     precision ${pct(l.precision)}  chance ${pct(l.chance)}       ${l.betterThanChance ? 'LEAK' : 'PASS'}`);
-  const o = r.linkingByOwner;
-  console.log(`(b) Linking via registry owner field  precision ${pct(o.precision)}  chance ${pct(o.chance)}       ${o.betterThanChance ? 'LEAK (documented limit)' : 'PASS'}`);
+  const o = r.linkingByRegistry;
+  console.log(`(b) Linking via registry commitment    precision ${pct(o.precision)}  chance ${pct(o.chance)}       ${o.betterThanChance ? 'LEAK' : 'PASS'}`);
   console.log(`(c) Balance estimate error (mean)     ${errPct(r.balanceEstimation.meanAbsPctError)}             exact = 0%         ${r.balanceEstimation.meanAbsPctError < 1 ? 'LEAK' : 'PASS'}`);
   console.log(`(c) Score estimate error (mean)       ${errPct(r.scoreEstimation.meanAbsPctError)}             exact = 0%         ${r.scoreEstimation.meanAbsPctError < 1 ? 'LEAK' : 'PASS'}`);
   if (r.liveDemo.present) {

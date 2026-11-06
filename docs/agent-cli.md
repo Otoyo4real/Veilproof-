@@ -90,7 +90,7 @@ valid, verifiable report. Pass `--no-underwrite` to skip the call.
 
 ## Dry run vs publish
 
-- **Dry run (default):** the 9 checks run against the locally
+- **Dry run (default):** the 10 checks run against the locally
   computed hashes and are labelled a local check — the onchain
   record does not exist yet, so nobody else can verify the report.
 - **`--publish`:** the hashes go onchain, then the CLI re-verifies
@@ -103,10 +103,10 @@ valid, verifiable report. Pass `--no-underwrite` to skip the call.
 `--out <dir>` (default `./veilproof-out`) receives `report.json`
 (public — share it), `disclosure.json` (private — send it only to
 the chosen verifier), and `policy.json`. The CLI also prints a
-summary: report ID, score, verdict, the 9 checks, and the publish
+summary: report ID, score, verdict, the 10 checks, and the publish
 transaction hash when published.
 
 ## Exit codes
 
-0 on success (all 9 checks pass), 1 on any failure. A failing claim
+0 on success (all 10 checks pass), 1 on any failure. A failing claim
 refuses to build a report — lower the thresholds or fix the data.

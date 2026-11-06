@@ -18,8 +18,14 @@
 //     "primary": { "accountId": "agent.testnet", "privateKey": "ed25519:..." },
 //     "linked": [
 //       { "accountId": "treasury2.testnet", "privateKey": "ed25519:..." }
-//     ]
+//     ],
+//     "publisher": { "accountId": "publisher.veilproof.testnet", "privateKey": "ed25519:..." }
 //   }
+// "publisher" is only needed with --publish against a v2 registry
+// (see src/registry.js): the dedicated publishing account signs the
+// publish call, and is its own controller. Against the deployed v1
+// registry the primary wallet signs and is recorded as owner. A v2
+// publish without a publisher entry fails with a clear message.
 // Linked wallets are proved by SIGNATURE (a NEP-413 link statement
 // signed with the linked wallet's key): no transfer, no gas, no
 // public onchain link between the wallets. The CLI signs the link
@@ -63,6 +69,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import nacl from 'tweetnacl';
 import { connect, keyStores, KeyPair } from 'near-api-js';
 import { fetchAccountSnapshot, dataHashForSnapshots } from '../src/onchain.js';
+import { describeSampling } from '../src/sampling.js';
 import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import { sanitiseClaims, sanitiseMetrics } from '../src/ai-analysis.js';
@@ -72,6 +79,11 @@ import { buildMultiDisclosurePackage, assertPublicReportClean } from '../src/dis
 import { encryptDisclosurePackage, verifierKeyFingerprint } from '../src/crypto-box.js';
 import { verifyReport } from '../src/verify-report.js';
 import { base58Decode, base58Encode, signLinkMessage } from '../src/nep413.js';
+// Registry v2 (commitments, allowlisted publisher): --publish probes
+// the registry version and uses the v1 flow (primary signs, owner
+// asserted) or the v2 flow (dedicated publisher signs, publisher
+// commitment asserted). See docs/contract-migration.md.
+import { probeContractVersion, isV2Version, buildV2PublishArgs } from '../src/registry.js';
 
 const REGISTRY_ID = 'registry.veilproof.testnet';
 const RPC_URL = 'https://rpc.testnet.near.org';
@@ -392,6 +404,9 @@ async function main() {
   const linkedProverHashes = linkedKeys.map((lk, i) => commitAddress(lk.accountId, linkedSalts[i]));
   const expiresAt = computeExpiresAt(args.expiryDays);
   const multiDataHash = await dataHashForSnapshots(snapshots);
+  // Sampling evidence: the bundle-level record the verifier
+  // recomputes from the disclosed samples (10th check).
+  const sampling = describeSampling(bundle);
   const report = buildReport({
     proverAddressHash,
     claims: evaluation.claims,
@@ -401,10 +416,14 @@ async function main() {
     expiresAt,
     linkedProverHashes,
     score,
+    sampling,
   });
-  assertPublicReportClean(report, primaryAccountId, primary.txs.map((t) => t.hash), [proverSalt, ...linkedSalts]);
+  // Counterparty account ids are checked as extra secrets: labels
+  // stay in the disclosure, never in the public report.
+  const counterpartyAccounts = Array.isArray(score.counterpartyLabels) ? score.counterpartyLabels.map((l) => l.account) : [];
+  assertPublicReportClean(report, primaryAccountId, primary.txs.map((t) => t.hash), [proverSalt, ...linkedSalts], counterpartyAccounts);
   for (let i = 0; i < linkedSnapshots.length; i += 1) {
-    assertPublicReportClean(report, linkedKeys[i].accountId, linkedSnapshots[i].txs.map((t) => t.hash), [proverSalt, ...linkedSalts]);
+    assertPublicReportClean(report, linkedKeys[i].accountId, linkedSnapshots[i].txs.map((t) => t.hash), [proverSalt, ...linkedSalts], counterpartyAccounts);
   }
   const disclosurePackage = buildMultiDisclosurePackage(
     report,
@@ -421,6 +440,8 @@ async function main() {
   console.log(`  reportId ${report.reportId} | expires ${new Date(Number(BigInt(expiresAt) / 1000000n)).toISOString()} | score ${score.value} (${score.band})`);
 
   let publishTxHash = null;
+  let registryIsV2 = false;
+  let expectedPublisherCommitment = null;
   if (args.publish) {
     console.log('[6/6] Publish hashes onchain (0.01 NEAR deposit, 100 TGas)');
     const keyStore = new keyStores.InMemoryKeyStore();
@@ -433,16 +454,50 @@ async function main() {
       keyStore,
     });
     const account = await near.account(primaryAccountId);
-    const result = await account.functionCall({
-      contractId: REGISTRY_ID,
-      methodName: 'publish_claim',
-      args: {
+    // Registry version probe: v1 has no get_version (null); v2
+    // publishes from the dedicated publisher account in keys.publisher.
+    const registryVersion = await probeContractVersion(
+      (method, methodArgs) => account.viewFunction({ contractId: REGISTRY_ID, methodName: method, args: methodArgs }),
+    );
+    registryIsV2 = isV2Version(registryVersion);
+    console.log(`  registry version: ${registryVersion ?? 'v1 (no get_version)'}`);
+    let signerAccount = account;
+    let publishArgs;
+    if (registryIsV2) {
+      const publisherEntry = keys.publisher;
+      if (!publisherEntry || typeof publisherEntry.accountId !== 'string' || typeof publisherEntry.privateKey !== 'string') {
+        fail('registry is v2 but no "publisher" entry in the keys file — add the dedicated publisher account (docs/contract-migration.md)');
+      }
+      await keyStore.setKey('testnet', publisherEntry.accountId, KeyPair.fromString(publisherEntry.privateKey));
+      signerAccount = await near.account(publisherEntry.accountId);
+      // The publisher is its own controller here; the treasury
+      // (primary + linked wallets) is neither publisher nor controller.
+      const built = buildV2PublishArgs({
+        claimId: report.reportId,
+        reportHash: hashes.report_hash,
+        evidenceHash: hashes.evidence_hash,
+        policyHash: hashes.policy_hash,
+        expiresAt: Number(expiresAt),
+        publisherAccountId: publisherEntry.accountId,
+        controllerAccountId: publisherEntry.accountId,
+      });
+      publishArgs = built.args;
+      expectedPublisherCommitment = built.commitments.publisher_commitment;
+      console.log(`  v2 publish: signer ${publisherEntry.accountId} (dedicated publisher, controller itself)`);
+    } else {
+      publishArgs = {
         claim_id: report.reportId,
         report_hash: hashes.report_hash,
         evidence_hash: hashes.evidence_hash,
         policy_hash: hashes.policy_hash,
         expires_at: Number(expiresAt),
-      },
+      };
+      console.log(`  v1 publish: signer ${primaryAccountId} (primary wallet, recorded as owner)`);
+    }
+    const result = await signerAccount.functionCall({
+      contractId: REGISTRY_ID,
+      methodName: 'publish_claim',
+      args: publishArgs,
       gas: PUBLISH_GAS,
       attachedDeposit: PUBLISH_DEPOSIT_YOCTO,
     });
@@ -473,7 +528,10 @@ async function main() {
     const account = await near.account(primaryAccountId);
     const claim = await account.viewFunction({ contractId: REGISTRY_ID, methodName: 'get_claim', args: { claim_id: report.reportId } });
     if (claim === null) fail('get_claim returned null right after publish');
-    if (claim.owner !== primaryAccountId) fail(`onchain owner ${claim.owner} is not the primary wallet`);
+    if (registryIsV2) {
+      if ('owner' in claim) fail('v2 get_claim still returns an owner field');
+      if (claim.publisher_commitment !== expectedPublisherCommitment) fail(`onchain publisher_commitment ${claim.publisher_commitment} does not match the expected commitment for the publisher account`);
+    } else if (claim.owner !== primaryAccountId) fail(`onchain owner ${claim.owner} is not the primary wallet`);
     const valid = await account.viewFunction({ contractId: REGISTRY_ID, methodName: 'is_claim_valid', args: { claim_id: report.reportId } });
     onchainRecord = { report_hash: claim.report_hash, evidence_hash: claim.evidence_hash, policy_hash: claim.policy_hash, valid };
   } else {
@@ -488,8 +546,8 @@ async function main() {
     linkKeyBindings,
   });
   for (const c of result.checks) console.log(`  check ${c.check}: ${c.passed ? 'PASS' : 'FAIL'} — ${c.detail}`);
-  if (!result.valid) fail('verification did not pass all 9 checks');
-  console.log(`  ${args.publish ? 'PASS — all 9 checks pass on the published claim' : 'PASS — all 9 checks pass locally (publish to make them verifiable by anyone)'}`);
+  if (!result.valid) fail('verification did not pass all 10 checks');
+  console.log(`  ${args.publish ? 'PASS — all 10 checks pass on the published claim' : 'PASS — all 10 checks pass locally (publish to make them verifiable by anyone)'}`);
 
   fs.mkdirSync(args.out, { recursive: true });
   fs.writeFileSync(path.join(args.out, 'report.json'), JSON.stringify(report, null, 2) + '\n');

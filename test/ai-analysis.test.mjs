@@ -16,6 +16,8 @@ import {
 } from '../src/ai-analysis.js';
 import { buildReport } from '../src/report.js';
 import { canonicalJson } from '../src/canonical.js';
+import { buildAttestationFixture, signText } from './attestation-fixture.mjs';
+import { createNonceStore, sha256Hex } from '../src/attestation-verify.js';
 
 // The demo wallet address and its four real demo-transfer hashes
 // (demo/history.json). None of these may ever reach a request payload.
@@ -54,6 +56,11 @@ const CONSISTENT_CONTENT = JSON.stringify({
 // model report echoes), 'throw', 'http500'. completionContent is the
 // model's reply text; completionStatus controls the HTTP status.
 // Every call is recorded in `calls` in order.
+//
+// NOTE: the echo modes return evidence with NO intel_quote, so the
+// real verifier reports UNVERIFIED for them — that is the point (a
+// nonce echo alone is never VERIFIED). The VERIFIED path uses
+// makeVerifiedMock below, which serves the real fixture evidence.
 function makeMockFetch({ attestationMode = 'echo', completionContent = CONSISTENT_CONTENT, completionStatus = 200 } = {}) {
   const calls = [];
   let lastEvidence = null;
@@ -76,15 +83,77 @@ function makeMockFetch({ attestationMode = 'echo', completionContent = CONSISTEN
       const body = JSON.parse(opts.body);
       calls.push({ kind: 'completion', url, headers: opts.headers || {}, body });
       if (completionStatus !== 200) return { ok: false, status: completionStatus, json: async () => ({}) };
+      const responseBytes = Buffer.from(
+        JSON.stringify({ id: 'chatcmpl-test', choices: [{ message: { content: completionContent } }] }),
+        'utf8',
+      );
       return {
         ok: true,
         status: 200,
-        json: async () => ({ id: 'chatcmpl-test', choices: [{ message: { content: completionContent } }] }),
+        arrayBuffer: async () => responseBytes.buffer.slice(responseBytes.byteOffset, responseBytes.byteOffset + responseBytes.byteLength),
+        json: async () => JSON.parse(responseBytes.toString('utf8')),
       };
     }
     throw new Error(`unexpected URL ${url}`);
   };
   return { fetchImpl, calls, lastEvidence: () => lastEvidence };
+}
+
+// Mock fetch serving REAL fixture evidence (buildAttestationFixture)
+// with test-controlled signing keys, so the full verification pipeline
+// runs for real and the summary comes back VERIFIED. The mock also
+// answers /v1/signature with a genuine provider_tee signature over
+// the exact request/response bytes, signed by the fixture model key.
+// Returns { fetchImpl, calls, fixture, opts } where opts carries the
+// dcap stub, the fixture nonce and a fresh nonce store for the call.
+function makeVerifiedMock({ completionContent = CONSISTENT_CONTENT } = {}) {
+  const fixture = buildAttestationFixture({ modelKey: true, gatewayKey: true });
+  const calls = [];
+  let requestBytes = null;
+  let responseBytes = null;
+  const fetchImpl = async (url, opts = {}) => {
+    if (String(url).includes('/attestation/report')) {
+      calls.push({ kind: 'attestation', url, headers: opts.headers || {} });
+      return { ok: true, status: 200, json: async () => fixture.evidence };
+    }
+    if (String(url).includes('/chat/completions')) {
+      requestBytes = Buffer.from(opts.body, 'utf8');
+      const body = JSON.parse(opts.body);
+      calls.push({ kind: 'completion', url, headers: opts.headers || {}, body });
+      responseBytes = Buffer.from(
+        JSON.stringify({ id: 'chatcmpl-test', choices: [{ message: { content: completionContent } }] }),
+        'utf8',
+      );
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => responseBytes.buffer.slice(responseBytes.byteOffset, responseBytes.byteOffset + responseBytes.byteLength),
+        json: async () => JSON.parse(responseBytes.toString('utf8')),
+      };
+    }
+    if (String(url).includes('/v1/signature/')) {
+      calls.push({ kind: 'signature', url, headers: opts.headers || {} });
+      const text = `${DEFAULT_MODEL}:${sha256Hex(requestBytes)}:${sha256Hex(responseBytes)}`;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          text,
+          signature: signText(text, fixture.keys.model),
+          signature_kind: 'provider_tee',
+          signing_address: fixture.keys.model.address,
+          signing_algo: 'ecdsa',
+        }),
+      };
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+  return {
+    fetchImpl,
+    calls,
+    fixture,
+    opts: { dcap: fixture.dcap, nonceStore: createNonceStore(), attestationNonce: fixture.nonce },
+  };
 }
 
 // Run fn with VEILPROOF_NEAR_AI_API_KEY set to key (or deleted when
@@ -111,39 +180,61 @@ test('no key -> not_configured, summary null, fetch never called', async () => {
   assert.equal(calls, 0);
 });
 
-test('happy path -> ok, structured attested summary, attestation before completion', async () => {
-  const { fetchImpl, calls, lastEvidence } = makeMockFetch();
+test('happy path -> ok, structured VERIFIED summary, attestation before completion before signature', async () => {
+  const { fetchImpl, calls, fixture, opts } = makeVerifiedMock();
   const result = await withApiKey('sk-test-key', () =>
-    analyseClaims({ claims: CLAIMS, metrics: METRICS, policyVersion: POLICY_VERSION }, { fetchImpl }));
+    analyseClaims({ claims: CLAIMS, metrics: METRICS, policyVersion: POLICY_VERSION }, { fetchImpl, ...opts }));
   assert.equal(result.status, 'ok');
   const s = result.summary;
   assert.equal(s.provider, 'near-ai');
   assert.equal(s.model, DEFAULT_MODEL);
   assert.equal(s.verdict, 'consistent');
   assert.deepEqual(s.points, ['Balance claim agrees with the balance metric.', 'No failed transactions were counted.']);
+  // The full verification verdict: DCAP quote + response signature.
+  assert.equal(s.attestation.status, 'VERIFIED');
+  assert.equal(s.attestation.method, 'near-ai-cloud-dcap+response-signature');
+  assert.equal(s.attestation.model, DEFAULT_MODEL);
   assert.equal(s.attestation.verifiable, true);
   assert.equal(s.attestation.nonceMatched, true);
+  assert.equal(s.attestation.quoteVerified, true);
+  assert.equal(s.attestation.signatureVerified, true);
+  assert.equal(s.attestation.measurementsChecked, true);
+  assert.match(s.attestation.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.match(s.attestation.ref, /^[0-9a-f]{64}$/);
   // ref pins the exact evidence the mock returned.
-  const expectedRef = createHash('sha256').update(canonicalJson(lastEvidence()), 'utf8').digest('hex');
+  const expectedRef = createHash('sha256').update(canonicalJson(fixture.evidence), 'utf8').digest('hex');
   assert.equal(s.attestation.ref, expectedRef);
-  // Attestation preflight ran before the completion.
-  assert.deepEqual(calls.map((c) => c.kind), ['attestation', 'completion']);
+  // Attestation preflight ran before the completion, and the signature
+  // was fetched after it.
+  assert.deepEqual(calls.map((c) => c.kind), ['attestation', 'completion', 'signature']);
+  // The attestation request asks for NEAR model evidence explicitly.
+  const attestationUrl = new URL(calls.find((c) => c.kind === 'attestation').url);
+  assert.equal(attestationUrl.searchParams.get('provider'), 'near');
+  assert.equal(attestationUrl.searchParams.get('model'), DEFAULT_MODEL);
+  assert.equal(attestationUrl.searchParams.get('signing_algo'), 'ecdsa');
+  assert.match(attestationUrl.searchParams.get('nonce'), /^[0-9a-f]{64}$/);
   // Completion request shape: no model substitution, enough tokens.
   const completion = calls.find((c) => c.kind === 'completion');
   assert.equal(completion.headers['x-no-aliasing'], 'true');
+  assert.equal(completion.headers['Accept-Encoding'], 'identity');
   assert.equal(completion.body.model, DEFAULT_MODEL);
   assert.ok(completion.body.max_tokens >= 800);
   assert.equal(completion.body.temperature, 0.3);
+  // The signature request is bound to the completion id.
+  assert.ok(calls.find((c) => c.kind === 'signature').url.includes('/v1/signature/chatcmpl-test'));
 });
 
-test('attestation echoed only by the model report -> still trusted', async () => {
+test('attestation echoed only by the model report -> UNVERIFIED, never trusted on an echo', async () => {
   const { fetchImpl } = makeMockFetch({ attestationMode: 'model-only' });
   const result = await withApiKey('sk-test-key', () =>
     analyseClaims({ claims: CLAIMS, metrics: METRICS, policyVersion: POLICY_VERSION }, { fetchImpl }));
   assert.equal(result.status, 'ok');
-  assert.equal(result.summary.attestation.verifiable, true);
-  assert.equal(result.summary.attestation.nonceMatched, true);
+  assert.equal(result.summary.attestation.status, 'UNVERIFIED');
+  assert.equal(result.summary.attestation.verifiable, false);
+  assert.equal(result.summary.attestation.nonceMatched, false);
+  assert.equal(result.summary.attestation.quoteVerified, false);
+  assert.equal(result.summary.attestation.signatureVerified, false);
+  // The echo-only evidence is still pinned by its ref.
   assert.match(result.summary.attestation.ref, /^[0-9a-f]{64}$/);
 });
 
@@ -153,9 +244,11 @@ test('nonce mismatch -> summary returned but unattested, never attested', async 
     analyseClaims({ claims: CLAIMS, metrics: METRICS, policyVersion: POLICY_VERSION }, { fetchImpl }));
   assert.equal(result.status, 'ok');
   assert.equal(result.summary.verdict, 'consistent');
+  assert.equal(result.summary.attestation.status, 'UNVERIFIED');
   assert.equal(result.summary.attestation.verifiable, false);
   assert.equal(result.summary.attestation.nonceMatched, false);
-  assert.equal(result.summary.attestation.ref, null);
+  // The mismatched evidence was still fetched, so its ref pins it.
+  assert.match(result.summary.attestation.ref, /^[0-9a-f]{64}$/);
 });
 
 test('attestation fetch throws -> unattested, analysis still completes', async () => {
@@ -163,6 +256,7 @@ test('attestation fetch throws -> unattested, analysis still completes', async (
   const result = await withApiKey('sk-test-key', () =>
     analyseClaims({ claims: CLAIMS, metrics: METRICS, policyVersion: POLICY_VERSION }, { fetchImpl }));
   assert.equal(result.status, 'ok');
+  assert.equal(result.summary.attestation.status, 'UNVERIFIED');
   assert.equal(result.summary.attestation.verifiable, false);
   assert.equal(result.summary.attestation.ref, null);
 });
@@ -250,11 +344,12 @@ test('maxTokens floors at 800', async () => {
   assert.equal(calls.find((c) => c.kind === 'completion').body.max_tokens, 800);
 });
 
-test('report interop: returned summary is accepted by buildReport as aiSummary', async () => {
-  const { fetchImpl } = makeMockFetch();
+test('report interop: a VERIFIED summary is accepted by buildReport as aiSummary', async () => {
+  const { fetchImpl, opts } = makeVerifiedMock();
   const result = await withApiKey('sk-test-key', () =>
-    analyseClaims({ claims: CLAIMS, metrics: METRICS, policyVersion: POLICY_VERSION }, { fetchImpl }));
+    analyseClaims({ claims: CLAIMS, metrics: METRICS, policyVersion: POLICY_VERSION }, { fetchImpl, ...opts }));
   assert.equal(result.status, 'ok');
+  assert.equal(result.summary.attestation.status, 'VERIFIED');
   const report = buildReport({
     proverAddressHash: HEX64,
     claims: CLAIMS,
@@ -360,16 +455,18 @@ test('parseUnderwritingOutput validates verdicts and coerces limit/confidence', 
   assert.equal(parseUnderwritingOutput('not json'), null);
 });
 
-test('underwriting: lend verdict on a strong score, attested, score in the payload', async () => {
-  const { fetchImpl, calls } = makeMockFetch({ completionContent: UNDERWRITE_CONTENT });
+test('underwriting: lend verdict on a strong score, VERIFIED, score in the payload', async () => {
+  const { fetchImpl, calls, opts } = makeVerifiedMock({ completionContent: UNDERWRITE_CONTENT });
   const result = await withApiKey('test-key', () =>
-    analyseUnderwriting({ claims: CLAIMS, metrics: METRICS, score: SCORE, policyVersion: POLICY_VERSION }, { fetchImpl }));
+    analyseUnderwriting({ claims: CLAIMS, metrics: METRICS, score: SCORE, policyVersion: POLICY_VERSION }, { fetchImpl, ...opts }));
   assert.equal(result.status, 'ok');
   assert.equal(result.summary.role, 'underwriting');
   assert.equal(result.summary.verdict, 'lend');
   assert.equal(result.summary.suggestedLimitNear, 5);
   assert.equal(result.summary.confidence, 'high');
+  assert.equal(result.summary.attestation.status, 'VERIFIED');
   assert.equal(result.summary.attestation.verifiable, true);
+  assert.equal(result.summary.attestation.signatureVerified, true);
   const completion = calls.find((c) => c.kind === 'completion');
   const sent = JSON.parse(completion.body.messages[1].content);
   assert.equal(sent.score.value, 850);

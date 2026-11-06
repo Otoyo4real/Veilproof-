@@ -12,7 +12,7 @@
 // time-weighted) -> deterministic score-v2 -> REAL NEAR AI underwriting
 // via the stored custom.near-ai-veilproof credential (helper, never
 // the key value) -> report (with score + attested underwriting summary)
-// -> tripwire -> publish hashes -> verify all 9 checks onchain ->
+// -> tripwire -> publish hashes -> verify all 10 checks onchain ->
 // write public/demo-report.json, public/demo-disclosure.json and
 // public/demo-policy.json (the files the verifier page's demo button
 // loads). Fail-closed at every step.
@@ -32,6 +32,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { connect, keyStores, KeyPair } from 'near-api-js';
 import { fetchAccountSnapshot, dataHashForSnapshots } from '../src/onchain.js';
+import { describeSampling } from '../src/sampling.js';
 import { evaluateClaims } from '../src/claims-engine.js';
 import { computeScore } from '../src/score.js';
 import {
@@ -45,6 +46,13 @@ import { canonicalJson } from '../src/canonical.js';
 import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, saltedAddressHash } from '../src/report.js';
 import { buildMultiDisclosurePackage, assertPublicReportClean } from '../src/disclosure.js';
 import { verifyReport } from '../src/verify-report.js';
+// Registry v2 (commitments, allowlisted publisher): the publish flow
+// probes the registry version and uses the v1 flow (demo wallet signs,
+// owner asserted) against the deployed v1 registry, or the v2 flow
+// (dedicated publisher account signs, publisher commitment asserted)
+// after the migration in docs/contract-migration.md. The publisher
+// account lives in .testnet-accounts.json as "publisher" once created.
+import { probeContractVersion, isV2Version, buildV2PublishArgs } from '../src/registry.js';
 
 const REGISTRY_ID = 'registry.veilproof.testnet';
 const DEMO_ACCOUNT = 'veilproof-demo.testnet';
@@ -254,6 +262,9 @@ const expiresAt = computeExpiresAt(EXPIRY_DAYS);
 // The evidence data hash is the MULTI hash over ALL snapshots (primary +
 // linked), not the primary's single-wallet hash — mirroring app.js.
 const multiDataHash = await dataHashForSnapshots([primary, linked]);
+// Sampling evidence: the bundle-level record the verifier
+// recomputes from the disclosed samples (10th check).
+const sampling = describeSampling({ wallets: [primary, linked] });
 const report = buildReport({
   proverAddressHash,
   claims: evaluation.claims,
@@ -263,9 +274,11 @@ const report = buildReport({
   expiresAt,
   linkedProverHashes,
   score,
+  sampling,
 });
-assertPublicReportClean(report, DEMO_ACCOUNT, primary.txs.map((t) => t.hash), [proverSalt, linkedSalt]);
-assertPublicReportClean(report, LINKED_ACCOUNT, linked.txs.map((t) => t.hash), [proverSalt, linkedSalt]);
+const counterpartyAccounts = Array.isArray(score.counterpartyLabels) ? score.counterpartyLabels.map((l) => l.account) : [];
+assertPublicReportClean(report, DEMO_ACCOUNT, primary.txs.map((t) => t.hash), [proverSalt, linkedSalt], counterpartyAccounts);
+assertPublicReportClean(report, LINKED_ACCOUNT, linked.txs.map((t) => t.hash), [proverSalt, linkedSalt], counterpartyAccounts);
 const disclosurePackage = buildMultiDisclosurePackage(report, DEMO_ACCOUNT, primary, [
   { address: LINKED_ACCOUNT, snapshot: linked, linkTxHash: LINK_TX_HASH, salt: linkedSalt },
 ], proverSalt);
@@ -287,16 +300,53 @@ const near = await connect({
   keyStore,
 });
 const demoAccount = await near.account(DEMO_ACCOUNT);
-const publishResult = await demoAccount.functionCall({
-  contractId: REGISTRY_ID,
-  methodName: 'publish_claim',
-  args: {
+// Registry version probe: v1 has no get_version (null) and records the
+// demo wallet as owner; v2 publishes from the dedicated publisher
+// account and records only a salted publisher commitment — the treasury
+// (demo wallet) never appears onchain in v2.
+const registryVersion = await probeContractVersion(
+  (method, args) => demoAccount.viewFunction({ contractId: REGISTRY_ID, methodName: method, args }),
+);
+const isV2 = isV2Version(registryVersion);
+console.log(`  registry version: ${registryVersion ?? 'v1 (no get_version)'}`);
+let signerAccount = demoAccount;
+let publishArgs;
+let expectedPublisherCommitment = null;
+if (isV2) {
+  const publisherEntry = accounts.publisher;
+  if (!publisherEntry || typeof publisherEntry.accountId !== 'string' || typeof publisherEntry.privateKey !== 'string') {
+    fail('registry is v2 but no "publisher" account in .testnet-accounts.json — create the dedicated publisher account first (docs/contract-migration.md)');
+  }
+  await keyStore.setKey('testnet', publisherEntry.accountId, KeyPair.fromString(publisherEntry.privateKey));
+  signerAccount = await near.account(publisherEntry.accountId);
+  // Demo uses the publisher account as its own controller (it revokes
+  // its own claims); the treasury is neither publisher nor controller.
+  const built = buildV2PublishArgs({
+    claimId: report.reportId,
+    reportHash: hashes.report_hash,
+    evidenceHash: hashes.evidence_hash,
+    policyHash: hashes.policy_hash,
+    expiresAt: Number(expiresAt),
+    publisherAccountId: publisherEntry.accountId,
+    controllerAccountId: publisherEntry.accountId,
+  });
+  publishArgs = built.args;
+  expectedPublisherCommitment = built.commitments.publisher_commitment;
+  console.log(`  v2 publish: signer ${publisherEntry.accountId} (dedicated publisher, controller itself)`);
+} else {
+  publishArgs = {
     claim_id: report.reportId,
     report_hash: hashes.report_hash,
     evidence_hash: hashes.evidence_hash,
     policy_hash: hashes.policy_hash,
     expires_at: Number(expiresAt),
-  },
+  };
+  console.log(`  v1 publish: signer ${DEMO_ACCOUNT} (demo wallet, recorded as owner)`);
+}
+const publishResult = await signerAccount.functionCall({
+  contractId: REGISTRY_ID,
+  methodName: 'publish_claim',
+  args: publishArgs,
   gas: PUBLISH_GAS,
   attachedDeposit: PUBLISH_DEPOSIT_YOCTO,
 });
@@ -305,14 +355,17 @@ if (typeof publishTxHash !== 'string' || publishTxHash.length === 0) fail('publi
 console.log(`  PASS — publish tx ${publishTxHash}`);
 console.log(`  explorer: https://testnet.nearblocks.io/txns/${publishTxHash}`);
 
-console.log('[7/7] Verify the published claim (all 9 checks must pass)');
+console.log('[7/7] Verify the published claim (all 10 checks must pass)');
 const claim = await demoAccount.viewFunction({
   contractId: REGISTRY_ID,
   methodName: 'get_claim',
   args: { claim_id: report.reportId },
 });
 if (claim === null) fail('get_claim returned null right after publish');
-if (claim.owner !== DEMO_ACCOUNT) fail(`onchain owner ${claim.owner} is not the demo wallet`);
+if (isV2) {
+  if ('owner' in claim) fail('v2 get_claim still returns an owner field');
+  if (claim.publisher_commitment !== expectedPublisherCommitment) fail(`onchain publisher_commitment ${claim.publisher_commitment} does not match the expected commitment for the publisher account`);
+} else if (claim.owner !== DEMO_ACCOUNT) fail(`onchain owner ${claim.owner} is not the demo wallet`);
 const valid = await demoAccount.viewFunction({
   contractId: REGISTRY_ID,
   methodName: 'is_claim_valid',
@@ -327,8 +380,8 @@ const result = await verifyReport({
   nowNs: nowNs.toString(),
 });
 for (const c of result.checks) console.log(`  check ${c.check}: ${c.passed ? 'PASS' : 'FAIL'} — ${c.detail}`);
-if (!result.valid) fail('verifyReport did not pass all 9 checks');
-console.log('  PASS — all 9 checks pass on the published claim');
+if (!result.valid) fail('verifyReport did not pass all 10 checks');
+console.log('  PASS — all 10 checks pass on the published claim');
 
 fs.writeFileSync(new URL('../public/demo-report.json', import.meta.url), JSON.stringify(report, null, 2) + '\n');
 fs.writeFileSync(new URL('../public/demo-disclosure.json', import.meta.url), JSON.stringify(disclosurePackage, null, 2) + '\n');

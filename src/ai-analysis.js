@@ -21,16 +21,24 @@
 // into the metrics. The model never sees the wallet address, never
 // sees a transaction hash, never sees the raw snapshot.
 //
-// Attestation follows the Genesis worker pattern (see
-// ~/workspace/genesis/src/worker-llm.js, read-only reference): a
-// preflight GET of /v1/attestation/report with a fresh random nonce,
-// trusted ONLY when the gateway or model report echoes that nonce.
-// The full evidence (~300 KB) is never stored in the summary; the
-// summary carries only attestation.ref, the SHA-256 of the canonical
-// evidence JSON, which pins the evidence content. A nonce mismatch or a
-// failed preflight does NOT abort the analysis — the completion still
-// runs, but the summary is labelled unattested (verifiable false,
-// ref null). Never attested on untrusted evidence.
+// Attestation follows the OFFICIAL NEAR AI Cloud verification
+// procedure (docs.near.ai, implemented in src/attestation-verify.js):
+// a preflight GET of /v1/attestation/report with a fresh random nonce
+// and provider=near, then full verification of the gateway report and
+// EVERY model_attestations[] candidate — DCAP quote verification
+// (@phala/dcap-qvl), TCB policy, nonce + signer binding read from the
+// VERIFIED quote, RTMR3 event-log replay, MRCONFIGID, model identity,
+// measurements — and, after the completion, a response-signature check
+// against the EXACT request/response bytes, bound to the completion
+// id and matched to exactly one verified preflight report. The result
+// is one of VERIFIED / UNVERIFIED / FAILED / EXPIRED; a nonce echo
+// alone is UNVERIFIED, never VERIFIED. The full evidence (~300 KB)
+// is never stored in the summary; the summary carries only
+// attestation.ref, the SHA-256 of the canonical evidence JSON, which
+// pins WHICH evidence was checked — it proves nothing about the
+// evidence itself. A failed preflight or signature does NOT abort the
+// analysis — the completion still runs, but the summary is labelled
+// with the real status (never attested on untrusted evidence).
 //
 // Key handling: the key comes from env VEILPROOF_NEAR_AI_API_KEY ONLY,
 // read at call time. Without it the function returns
@@ -47,9 +55,17 @@
 // | 'empty_output' | 'api_error'. A successful summary is a plain
 // object, so it is accepted as-is by buildReport's aiSummary:
 //   { provider: 'near-ai', model, verdict: 'consistent'|'inconsistent',
-//     points: string[], attestation: { verifiable, nonceMatched, ref } }
-// The summary's attestation.ref (or null) is the attestationRef to pass
-// to evidenceHash / buildReport.
+//     points: string[], attestation }
+// where attestation is the full verification verdict from
+// src/attestation-verify.js:
+//   { status: 'VERIFIED'|'UNVERIFIED'|'FAILED'|'EXPIRED', method,
+//     model, nonceMatched, quoteVerified, signatureVerified,
+//     measurementsChecked, expiresAt, details, error?,
+//     verifiable, ref }
+// verifiable is true only when status is VERIFIED; ref is the
+// SHA-256 of the canonical evidence JSON (which evidence was checked,
+// not proof). The summary's attestation.ref (or null) is the
+// attestationRef to pass to evidenceHash / buildReport.
 //
 // Model gotcha (from the Genesis worker): the default model reasons
 // before answering, so a small max_tokens is spent entirely on
@@ -58,6 +74,14 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { canonicalJson } from './canonical.js';
+import {
+  verifyAttestationEvidence,
+  verifyResponseSignature,
+  combineAttestation,
+  resolveAttestationPolicy,
+  defaultNonceStore,
+  DEFAULT_SIGNING_ALGO,
+} from './attestation-verify.js';
 
 export const DEFAULT_MODEL = 'z-ai/glm-5.3-flash';
 export const DEFAULT_BASE_URL = 'https://cloud-api.near.ai/v1';
@@ -329,57 +353,103 @@ export function parseUnderwritingOutput(content) {
   return { verdict: parsed.verdict, suggestedLimitNear, confidence, points };
 }
 
-// Preflight attestation: GET the evidence with a fresh nonce and trust
-// it only when the gateway or the first model report echoes that nonce.
-// Never throws: any failure (network, bad JSON, non-2xx, mismatch)
-// yields an unattested result, and the completion may still run.
-async function fetchAttestation(fetchImpl, base, model, apiKey) {
-  const unattested = (detail) => ({
-    verifiable: false,
+// The UNVERIFIED preflight result used when the evidence could not
+// even be fetched (network, bad JSON, non-2xx). It carries the same
+// shape verifyAttestationEvidence returns, so callers never have to
+// handle a missing attestation object.
+function unverifiedPreflight(model, error) {
+  return {
+    status: 'UNVERIFIED',
+    method: 'near-ai-cloud-dcap',
+    model,
     nonceMatched: false,
-    ref: null,
-    detail,
-  });
-  const nonce = randomBytes(32).toString('hex');
+    quoteVerified: false,
+    signatureVerified: false,
+    measurementsChecked: false,
+    expiresAt: null,
+    verifiedAt: null,
+    details: {},
+    error,
+  };
+}
+
+// Preflight attestation: GET the evidence with a fresh nonce and run
+// the official verification procedure on it (src/attestation-verify.js).
+// The request asks for NEAR model evidence explicitly (provider=near)
+// and sends the canonical model id with x-no-aliasing, so the model
+// cannot be silently substituted. Never throws: any failure (network,
+// bad JSON, non-2xx, failed verification) yields an UNVERIFIED or
+// FAILED preflight, and the completion may still run.
+// Returns { preflight, evidence } — evidence is null when the fetch
+// itself failed, so the caller can still pin a ref when it exists.
+// opts.attestationNonce is a test seam: a fixed 64-hex nonce to use
+// instead of a fresh random one. Production callers never pass it.
+async function fetchAttestation(fetchImpl, base, model, apiKey, { policy, dcap, nonceStore, signingAlgo, attestationNonce } = {}) {
+  const nonce =
+    typeof attestationNonce === 'string' && /^[0-9a-fA-F]{64}$/.test(attestationNonce)
+      ? attestationNonce.toLowerCase()
+      : randomBytes(32).toString('hex');
   let evidence;
   try {
     const url =
       `${base}/attestation/report?model=${encodeURIComponent(model)}` +
-      `&signing_algo=ecdsa&nonce=${nonce}`;
+      `&provider=near&signing_algo=${encodeURIComponent(signingAlgo)}&nonce=${nonce}`;
     const res = await fetchImpl(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}`, 'x-no-aliasing': 'true' },
       signal: AbortSignal.timeout(ATTESTATION_TIMEOUT_MS),
     });
-    if (!res.ok) return unattested(`attestation endpoint returned HTTP ${res.status}`);
+    if (!res.ok) {
+      return { preflight: unverifiedPreflight(model, `attestation endpoint returned HTTP ${res.status}`), evidence: null };
+    }
     evidence = await res.json();
   } catch (err) {
-    return unattested(`attestation fetch failed: ${String(err && err.message ? err.message : err).slice(0, 120)}`);
+    return {
+      preflight: unverifiedPreflight(model, `attestation fetch failed: ${String(err && err.message ? err.message : err).slice(0, 120)}`),
+      evidence: null,
+    };
   }
-  if (!isObject(evidence)) return unattested('attestation evidence was not a JSON object');
-  const gatewayNonce = evidence.gateway_attestation && evidence.gateway_attestation.request_nonce;
-  const modelNonce =
-    evidence.model_attestations && evidence.model_attestations[0] && evidence.model_attestations[0].request_nonce;
-  if (gatewayNonce !== nonce && modelNonce !== nonce) {
-    return unattested('attestation nonce mismatch: evidence cannot be tied to this request');
-  }
-  return {
-    verifiable: true,
-    nonceMatched: true,
-    ref: sha256Hex(canonicalJson(evidence)),
-  };
+  const preflight = await verifyAttestationEvidence(evidence, {
+    nonce,
+    model,
+    policy,
+    dcap,
+    nonceStore,
+  });
+  return { preflight, evidence };
 }
 
 // Shared NEAR AI call: attestation preflight, then one completion
-// with the given messages. Returns
+// with the given messages, then a response-signature check. The
+// request body is built ONCE and its exact bytes retained; the raw
+// response bytes are retained before any JSON parsing, because the
+// signature covers exactly those bytes. Returns
 // { status: 'ok', content, attestation } on a non-empty completion, or
 // { status, attestation, error? } with status 'not_configured' |
 // 'api_error' | 'empty_output'. The caller parses `content` for its
 // own job. The attestation is always attempted first; a failed
 // preflight leaves the result unattested but does not abort the call.
-async function callNearAi({ fetchImpl, base, model, apiKey, messages, maxTokens }) {
-  const attestation = await fetchAttestation(fetchImpl, base, model, apiKey);
+async function callNearAi({ fetchImpl, base, model, apiKey, messages, maxTokens, policy, dcap, nonceStore, signingAlgo, attestationNonce }) {
+  const { preflight, evidence } = await fetchAttestation(fetchImpl, base, model, apiKey, {
+    policy,
+    dcap,
+    nonceStore,
+    signingAlgo,
+    attestationNonce,
+  });
+  // ref pins WHICH evidence was checked; it is a content hash, not
+  // verification. It stays null when no evidence was fetched at all.
+  const ref = evidence ? sha256Hex(canonicalJson(evidence)) : null;
+  const requestBody = JSON.stringify({
+    model,
+    messages,
+    temperature: 0.3,
+    max_tokens: maxTokens,
+  });
+  const requestBytes = Buffer.from(requestBody, 'utf8');
   let content;
+  let responseBytes;
+  let completionBody;
   try {
     const res = await fetchImpl(`${base}/chat/completions`, {
       method: 'POST',
@@ -387,33 +457,65 @@ async function callNearAi({ fetchImpl, base, model, apiKey, messages, maxTokens 
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
         'x-no-aliasing': 'true',
+        // Identity encoding, so the bytes read back are the bytes the
+        // gateway signed — no decompression ambiguity in the hash.
+        'Accept-Encoding': 'identity',
       },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: 0.3,
-        max_tokens: maxTokens,
-      }),
+      body: requestBody,
       signal: AbortSignal.timeout(COMPLETION_TIMEOUT_MS),
     });
     if (!res.ok) {
+      const attestation = { ...combineAttestation(preflight, null, { requireSignature: policy.requireSignature }), ref, verifiable: false };
       return { status: 'api_error', attestation, error: `completion endpoint returned HTTP ${res.status}` };
     }
-    const body = await res.json();
-    content = (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
+    responseBytes = Buffer.from(await res.arrayBuffer());
+    completionBody = JSON.parse(responseBytes.toString('utf8'));
+    content = (completionBody.choices && completionBody.choices[0] && completionBody.choices[0].message && completionBody.choices[0].message.content) || '';
     content = String(content).trim();
   } catch (err) {
+    const attestation = { ...combineAttestation(preflight, null, { requireSignature: policy.requireSignature }), ref, verifiable: false };
     return { status: 'api_error', attestation, error: String(err && err.message ? err.message : err).slice(0, 200) };
   }
   if (content.length === 0) {
+    const attestation = { ...combineAttestation(preflight, null, { requireSignature: policy.requireSignature }), ref, verifiable: false };
     return { status: 'empty_output', attestation };
   }
+
+  // Response signature: fetched only when there is a completion id to
+  // bind it to AND verified preflight evidence to match its signer
+  // against. Otherwise the result is UNVERIFIED by construction.
+  let signature = null;
+  const completionId = completionBody && typeof completionBody.id === 'string' ? completionBody.id : null;
+  if (completionId !== null && preflight.status === 'VERIFIED') {
+    signature = await verifyResponseSignature({
+      fetchImpl,
+      base,
+      completionId,
+      model,
+      signingAlgo,
+      apiKey,
+      requestBytes,
+      responseBytes,
+      preflight,
+      policy,
+    });
+  } else if (completionId === null) {
+    signature = { status: 'UNVERIFIED', signatureVerified: false, error: 'completion id is missing, so no signature can be fetched' };
+  } else {
+    signature = { status: 'UNVERIFIED', signatureVerified: false, error: 'preflight evidence is not verified, so no response signature can be matched to it' };
+  }
+  const combined = combineAttestation(preflight, signature, { requireSignature: policy.requireSignature });
+  const attestation = { ...combined, ref, verifiable: combined.status === 'VERIFIED' };
   return { status: 'ok', content, attestation };
 }
 
 // Resolve the call options shared by both jobs: key (fail closed),
 // fetch, model, base URL, max tokens (floored at 800 — the model
-// reasons before answering, so a smaller budget returns empty).
+// reasons before answering, so a smaller budget returns empty), and
+// the attestation options. opts.dcap / opts.nonceStore /
+// opts.attestationPolicy / opts.attestationNonce are test seams:
+// without them the real @phala/dcap-qvl verifier, the process-wide
+// nonce store, the env policy, and a fresh random nonce are used.
 function resolveCallOpts(opts) {
   const apiKey = process.env.VEILPROOF_NEAR_AI_API_KEY;
   if (!apiKey) return { status: 'not_configured' };
@@ -424,7 +526,25 @@ function resolveCallOpts(opts) {
   const model = opts.model || process.env.VEILPROOF_NEAR_AI_MODEL || DEFAULT_MODEL;
   const base = (opts.baseUrl || process.env.VEILPROOF_NEAR_AI_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
   const maxTokens = Math.max(MIN_MAX_TOKENS, opts.maxTokens || DEFAULT_MAX_TOKENS);
-  return { status: 'ok', apiKey, fetchImpl, model, base, maxTokens };
+  let policy;
+  try {
+    policy = opts.attestationPolicy || resolveAttestationPolicy();
+  } catch (err) {
+    return { status: 'api_error', error: String(err && err.message ? err.message : err).slice(0, 200) };
+  }
+  return {
+    status: 'ok',
+    apiKey,
+    fetchImpl,
+    model,
+    base,
+    maxTokens,
+    policy,
+    dcap: opts.dcap,
+    nonceStore: opts.nonceStore || defaultNonceStore,
+    signingAlgo: opts.signingAlgo || DEFAULT_SIGNING_ALGO,
+    attestationNonce: opts.attestationNonce,
+  };
 }
 
 // Analyse evaluated claims with NEAR AI Cloud (TEE).
@@ -452,6 +572,11 @@ export async function analyseClaims({ claims, metrics, policyVersion }, opts = {
     apiKey: resolved.apiKey,
     messages: buildPromptMessages(cleanClaims, cleanMetrics, policyVersion),
     maxTokens: resolved.maxTokens,
+    policy: resolved.policy,
+    dcap: resolved.dcap,
+    nonceStore: resolved.nonceStore,
+    signingAlgo: resolved.signingAlgo,
+    attestationNonce: resolved.attestationNonce,
   });
   if (called.status !== 'ok') {
     return { status: called.status, summary: null, ...(called.error ? { error: called.error } : {}) };
@@ -478,11 +603,12 @@ export async function analyseClaims({ claims, metrics, policyVersion }, opts = {
       model: resolved.model,
       verdict,
       points,
-      attestation: {
-        verifiable: called.attestation.verifiable,
-        nonceMatched: called.attestation.nonceMatched,
-        ref: called.attestation.ref,
-      },
+      // The full attestation verdict: status VERIFIED / UNVERIFIED /
+      // FAILED / EXPIRED plus the per-check detail. verifiable and ref
+      // are kept for existing consumers: verifiable is true only when
+      // the status is VERIFIED, and ref pins which evidence was
+      // checked (a content hash, not verification).
+      attestation: called.attestation,
     },
   };
 }
@@ -554,6 +680,11 @@ export async function analyseUnderwriting({ claims, metrics, score, policyVersio
     apiKey: resolved.apiKey,
     messages: buildUnderwritingPromptMessages(cleanClaims, cleanMetrics, cleanScore, policyVersion),
     maxTokens: resolved.maxTokens,
+    policy: resolved.policy,
+    dcap: resolved.dcap,
+    nonceStore: resolved.nonceStore,
+    signingAlgo: resolved.signingAlgo,
+    attestationNonce: resolved.attestationNonce,
   });
   if (called.status !== 'ok') {
     return { status: called.status, summary: null, ...(called.error ? { error: called.error } : {}) };
@@ -581,11 +712,8 @@ export async function analyseUnderwriting({ claims, metrics, score, policyVersio
       suggestedLimitNear,
       confidence,
       points,
-      attestation: {
-        verifiable: called.attestation.verifiable,
-        nonceMatched: called.attestation.nonceMatched,
-        ref: called.attestation.ref,
-      },
+      // Full attestation verdict — see analyseClaims for the shape.
+      attestation: called.attestation,
     },
   };
 }

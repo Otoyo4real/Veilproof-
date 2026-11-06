@@ -41,7 +41,7 @@ test('agent CLI: unknown argument, missing --keys and missing --policy fail with
   assert.match(noPolicy.stderr, /--policy is required/);
 });
 
-test('agent CLI: dry run against the demo wallets builds a signature-linked report and verifies all 9 checks', { timeout: 240000 }, () => {
+test('agent CLI: dry run against the demo wallets builds a signature-linked report and verifies all 10 checks', { timeout: 240000 }, () => {
   const out = mkdtempSync(join(tmpdir(), 'agent-prove-'));
   const r = run([
     '--keys', KEYS,
@@ -54,7 +54,7 @@ test('agent CLI: dry run against the demo wallets builds a signature-linked repo
   assert.equal(r.status, 0, `CLI failed: ${r.stderr}\n${r.stdout}`);
   assert.match(r.stdout, /score 770 \(solid\)/);
   assert.match(r.stdout, /check link_proofs: PASS — All 1 linked wallet\(s\) proved ownership \(1 by signature\)/);
-  assert.match(r.stdout, /PASS — all 9 checks pass locally/);
+  assert.match(r.stdout, /PASS — all 10 checks pass locally/);
   assert.match(r.stdout, /"published": false/);
   const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'));
   const disclosure = JSON.parse(readFileSync(join(out, 'disclosure.json'), 'utf8'));

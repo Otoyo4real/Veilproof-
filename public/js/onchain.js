@@ -21,6 +21,7 @@
 // test/frontend-parity.test.mjs. Keep the two in sync.
 
 import { sha256Hex } from './crypto.js';
+import { describeSampling } from './sampling.js';
 
 export const NEAR_TESTNET_RPC = 'https://rpc.testnet.near.org';
 
@@ -296,11 +297,14 @@ export function computeSampleHeights(currentBlockHeight, { windowHours, samples 
 // Sample an account's balance history at past block heights.
 // Same rules as the Node module: ~1 block per second, `samples`
 // readings ending at the current height, spaced evenly across the
-// window. Throws when the account did not exist at a sampled height.
+// window. A height the node cannot serve is recorded in
+// missingHeights, not thrown (see sampleBalanceHistoryDetailed);
+// only a run with zero successful readings throws. Each sample also
+// carries blockTimestampNs when the block header was served.
 // Pass explicit `heights` (from computeSampleHeights, computed once)
 // when sampling several wallets: their samples must sit on the same
 // heights or the sustained/time-weighted claims refuse to run.
-export async function sampleBalanceHistory(accountId, { windowHours, samples, heights }) {
+export async function sampleBalanceHistoryDetailed(accountId, { windowHours, samples, heights }) {
   if (typeof accountId !== 'string' || accountId.length === 0) {
     throw new Error('sampleBalanceHistory: accountId must be a non-empty string');
   }
@@ -322,15 +326,41 @@ export async function sampleBalanceHistory(accountId, { windowHours, samples, he
     sampleHeights = computeSampleHeights(current.blockHeight, { windowHours, samples });
   }
   const out = [];
+  const missingHeights = [];
   for (const height of sampleHeights) {
-    const result = await rpcCall('query', {
-      request_type: 'view_account',
-      account_id: accountId,
-      block_id: height,
-    });
-    out.push({ blockHeight: height, amount: String(result.amount) });
+    let result;
+    try {
+      result = await rpcCall('query', {
+        request_type: 'view_account',
+        account_id: accountId,
+        block_id: height,
+      });
+    } catch {
+      missingHeights.push(height);
+      continue;
+    }
+    const sample = { blockHeight: height, amount: String(result.amount) };
+    try {
+      const block = await rpcCall('block', { block_id: height });
+      sample.blockTimestampNs = String(block.header.timestamp_nanosec);
+    } catch {
+      // Header unavailable: the balance reading stands, and
+      // describeSampling estimates this timestamp instead.
+    }
+    out.push(sample);
   }
-  return out;
+  if (out.length === 0) {
+    throw new Error(
+      'sampleBalanceHistory: no balance samples could be read '
+      + `(account ${accountId}, ${samples} requested heights, all unservable) — try a shorter window`,
+    );
+  }
+  return { samples: out, missingHeights, requestedHeights: sampleHeights, samplesRequested: samples };
+}
+
+export async function sampleBalanceHistory(accountId, { windowHours, samples, heights }) {
+  const detailed = await sampleBalanceHistoryDetailed(accountId, { windowHours, samples, heights });
+  return detailed.samples;
 }
 
 // Fetch a full snapshot for a claim: current account state plus the
@@ -341,8 +371,9 @@ export async function sampleBalanceHistory(accountId, { windowHours, samples, he
 // duplicates are collapsed. Returned txs are sorted by hash, so the
 // snapshot (and its dataHash) is canonical.
 // opts.balanceSamples: { windowHours, samples } — when given, the
-// snapshot also carries balanceSamples and balanceSampleWindowHours,
-// and the dataHash is computed by the multi-wallet path.
+// snapshot also carries balanceSamples, balanceSampleWindowHours and
+// a `sampling` record (see describeSampling), and the dataHash is
+// computed by the multi-wallet path.
 export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) {
   const account = await getAccount(accountId);
   const seen = new Set();
@@ -358,8 +389,14 @@ export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) 
   txs.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
   const snapshot = { account, txs, blockHeight: account.blockHeight };
   if (opts.balanceSamples) {
-    snapshot.balanceSamples = await sampleBalanceHistory(accountId, opts.balanceSamples);
+    const detailed = await sampleBalanceHistoryDetailed(accountId, opts.balanceSamples);
+    snapshot.balanceSamples = detailed.samples;
     snapshot.balanceSampleWindowHours = opts.balanceSamples.windowHours;
+    snapshot.sampling = describeSampling(snapshot, {
+      samplesRequested: detailed.samplesRequested,
+      requestedHeights: detailed.requestedHeights,
+      missingHeights: detailed.missingHeights,
+    });
   }
   snapshot.dataHash = await dataHashForSnapshots([snapshot]);
   return snapshot;

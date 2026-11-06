@@ -183,7 +183,12 @@ export function buildMultiDisclosurePackage(report, address, snapshot, linked = 
 // salts (optional, P2): the per-report salt(s) — a string or an array.
 // A salt must never appear in the public report either; if it does,
 // the report is linkable by dictionary attack again, so refuse it.
-export function assertPublicReportClean(report, address, txHashes, salts) {
+// extraSecrets (optional): any other strings that must never appear
+// in the public report — e.g. outside counterparty account ids. The
+// public report carries label counts, never account ids; pass the
+// counterparties here so a construction bug that smuggles one in is
+// caught before publishing.
+export function assertPublicReportClean(report, address, txHashes, salts, extraSecrets) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) {
     throw new Error('assertPublicReportClean: report must be an object');
   }
@@ -207,6 +212,13 @@ export function assertPublicReportClean(report, address, txHashes, salts) {
     if (typeof salt !== 'string' || salt.length === 0) continue;
     if (json.includes(salt)) {
       throw new Error('assertPublicReportClean: report leaks a prover salt');
+    }
+  }
+  const extraList = extraSecrets === undefined || extraSecrets === null ? [] : Array.isArray(extraSecrets) ? extraSecrets : [extraSecrets];
+  for (const secret of extraList) {
+    if (typeof secret !== 'string' || secret.length === 0) continue;
+    if (json.includes(secret)) {
+      throw new Error('assertPublicReportClean: report leaks a value that must stay private');
     }
   }
   // P3 predicate disclosure: a public report must not carry exact

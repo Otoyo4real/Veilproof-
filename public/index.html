@@ -51,7 +51,7 @@
         <tr><td>Transactions in 30 days</td><td class="mock-pass">Pass</td></tr>
         <tr><td>Credit score</td><td class="mock-pass">solid</td></tr>
       </table>
-      <p class="mock-ai">Underwriting (advisory): <strong>lend_with_limits, suggested limit 5 NEAR</strong>, NEAR AI Cloud, attested</p>
+      <p class="mock-ai">Underwriting (advisory): <strong>lend_with_limits, suggested limit 5 NEAR</strong>, NEAR AI Cloud, attestation status shown on the verifier page</p>
       <p class="mock-foot">Anchored on NEAR testnet · tx <span class="mono">3ouNst9D…TW9PQ</span></p>
     </div>
   </div>
@@ -70,6 +70,7 @@
       <div id="demoChecks"></div>
       <h3>Claims in this report</h3>
       <div id="demoClaims"></div>
+      <div id="demoPanels"></div>
       <h3>Report facts</h3>
       <div id="demoFacts"></div>
     </div>
@@ -91,12 +92,12 @@
     <div class="how-item">
       <span class="step-num">2</span>
       <strong>Publish</strong>
-      <span>NEAR AI Cloud analyses the claims in a TEE and attests the result. Only the report hashes go onchain, never the address, never amounts.</span>
+      <span>NEAR AI Cloud analyses the claims in a TEE and records an attestation reference. Only the report hashes go onchain, never the address, never amounts.</span>
     </div>
     <div class="how-item">
       <span class="step-num">3</span>
       <strong>Verify</strong>
-      <span>The verifier refetches the chain, reruns every claim, and gets a clear VALID or INVALID, in one click, with no account and no wallet.</span>
+      <span>The verifier checks the chain record, reruns every claim, and sees a separate status for the source data, the calculations, the attestation, the report integrity and the privacy, in one click, with no account and no wallet.</span>
     </div>
   </div>
 </section>
@@ -109,16 +110,33 @@
   aggregates only, never the address, never transaction hashes.</p>
   <table class="proves-table">
     <tr><th>Claim</th><th>What proves it</th></tr>
-    <tr><td>The data is genuine</td><td>The verifier refetches it from the chain. Onchain data cannot be typed in by the user.</td></tr>
+    <tr><td>The data is genuine</td><td>The verifier checks the disclosed snapshot against the data hash published onchain. Onchain data cannot be typed in by the user.</td></tr>
     <tr><td>The balance was held, not flashed</td><td>Sampled balance history at past block heights: the lowest sampled balance over the window, not a snapshot.</td></tr>
     <tr><td>The wallets are all the prover's</td><td>Each linked wallet proves ownership with a transfer to the primary wallet, or by signing a link message with its key, no transfer, no gas.</td></tr>
     <tr><td>The credit score is real</td><td>The score is deterministic (score v2, published rules): the verifier recomputes it from the same snapshots and the same windows. A tampered score fails verification.</td></tr>
-    <tr><td>The underwriting opinion is honest</td><td>NEAR AI Cloud TEE attestation, nonce bound to the request. The verdict is advisory, a thin score can never support a lend, by a deterministic guard.</td></tr>
+    <tr><td>The underwriting opinion is honest</td><td>NEAR AI Cloud TEE attestation is checked server side when the analysis runs: the DCAP quote, the nonce, the response signature and the measurements. This page does not recheck them, so the attestation status is shown on the verifier page. The verdict is advisory, a thin score can never support a lend, by a deterministic guard.</td></tr>
     <tr><td>The report was not altered</td><td>SHA 256 report hash anchored on NEAR; tampering fails verification.</td></tr>
     <tr><td>The wallet belongs to the prover</td><td>The prover signs a challenge with the wallet key; the publish transaction records the signer as owner.</td></tr>
     <tr><td>The wallet address stays private</td><td>Only a hash commitment is published. The address travels only in the private disclosure package to the verifier the prover chose.</td></tr>
     <tr><td>Anything offchain</td><td>Nothing. VeilProof only ever makes claims about onchain data.</td></tr>
   </table>
+</section>
+
+<section class="section" aria-label="How verification works">
+  <h2 class="section-title">How verification works</h2>
+  <p class="section-lede">Verification answers five separate questions, and each one gets its own status. A report can pass four and fail one, and the page says so plainly.</p>
+  <p><strong>Source data.</strong> The disclosure package holds a snapshot of the wallet history. The verifier hashes that snapshot and compares it with the data hash published onchain. If they match, the data is the data that was published.</p>
+  <p><strong>Calculations.</strong> The verifier reruns the claims, the credit score and the wallet link proofs from the snapshot, using the published policy. If the rerun gives the same answers as the report, the calculations reproduce.</p>
+  <p><strong>AI attestation.</strong> The AI analysis ran inside a trusted enclave, and its attestation is checked on its own. A nonce match alone does not verify it. The panel shows which of the nonce, quote, signature and measurements were actually checked.</p>
+  <p><strong>Report integrity.</strong> The report, evidence and policy hashes are compared with the onchain record, the disclosure is checked against the report commitment, and the registry is asked whether the claim is still valid. A report that was revoked or expired fails here even if everything else passes.</p>
+  <p><strong>Privacy.</strong> The public report carries thresholds and a score band only, never exact values, and the wallet commitment uses a fresh salt per report. The panel says what the public report discloses and what it keeps private.</p>
+</section>
+
+<section class="section" aria-label="What the verifier can and cannot learn">
+  <h2 class="section-title">What the verifier can and cannot learn</h2>
+  <p><strong>You can learn:</strong> whether the disclosed history supports the claims, whether the score reproduces, whether the report is the one that was published, whether it is still valid, and what the public report discloses.</p>
+  <p><strong>You cannot learn:</strong> the real world identity behind the wallet, whether a counterparty is independent of the prover, or anything about data that never touched the chain. The score measures observable onchain activity only. It is not a guarantee of repayment.</p>
+  <p><strong>What you see that the public does not:</strong> the wallet address and the exact values, because the prover sent you the disclosure package. Do not republish them. And one limit stays: the registry record names the publishing wallet as owner, so claims from one wallet can still be linked through the registry even though the report commitments cannot be matched.</p>
 </section>
 
 <section class="section" aria-label="Use cases">
@@ -130,7 +148,7 @@
     </div>
     <div class="use-item">
       <strong>Agent to agent credit</strong>
-      <span>A service agent checks a client agent's score and an attested underwriting opinion before extending compute or credit, the score is recomputable, so no one has to trust the claimant.</span>
+      <span>A service agent checks a client agent's score and a NEAR AI underwriting opinion before extending compute or credit, the score is recomputable, so no one has to trust the claimant.</span>
     </div>
     <div class="use-item">
       <strong>Lending</strong>

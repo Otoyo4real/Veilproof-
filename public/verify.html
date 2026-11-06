@@ -29,22 +29,25 @@
   </div>
   <p id="demoStatus" class="muted"></p>
   <p>The demo loads a real published claim from the demo wallet and verifies it
-  against its onchain record, all nine checks should pass, including the
+  against its onchain record, all ten checks should pass, including the
   AI summary. The report proves claims about a wallet's onchain history, for
   example "balance at least 5 NEAR", without revealing which wallet to the
   public.</p>
 </section>
 
 <div class="note">
-<strong>What verification proves.</strong> The report hash, evidence hash
-and policy hash match the record published on NEAR, so the report was not
-altered after publication. The data hash is recomputed from the disclosure
-snapshot, and the claims are rerun from that snapshot, so the claims
-follow from chain data the verifier can refetch. The wallet address is
-never shown here, only its hash commitment.
+<strong>What verification proves.</strong> Five separate statuses, shown
+below: the source data matches the hash published on NEAR, the claims and
+score were rerun from the disclosure snapshot, the report itself matches
+its onchain record, the AI attestation was checked on its own, and the
+privacy of the public report. The wallet address appears only in the
+disclosure package you pasted, never in the public report.
 <strong>What it does not prove.</strong> Nothing about data that never
-touched the chain. A report with no AI summary means "not analysed", not
-"verified by AI".
+touched the chain. The verifier does not refetch the account state from
+the chain, it checks the disclosure snapshot against the data hash
+published onchain. A report with no AI summary means "not analysed", not
+"verified by AI". The AI attestation is not verified unless the
+attestation panel says so.
 </div>
 
 <section class="card">
@@ -98,6 +101,10 @@ touched the chain. A report with no AI summary means "not analysed", not
 <div id="certificate" hidden>
   <div id="banner" class="banner"></div>
   <section class="card">
+    <h2>Verification status</h2>
+    <div id="statuses"></div>
+  </section>
+  <section class="card">
     <h2>Checks</h2>
     <div id="checks"></div>
   </section>
@@ -106,10 +113,76 @@ touched the chain. A report with no AI summary means "not analysed", not
     <div id="claims"></div>
   </section>
   <section class="card">
+    <h2>Privacy status</h2>
+    <div id="privacyPanel"></div>
+  </section>
+  <section class="card">
+    <h2>Cryptographic attestation</h2>
+    <div id="attestationPanel"></div>
+  </section>
+  <section class="card">
+    <h2>Report integrity</h2>
+    <div id="integrityPanel"></div>
+  </section>
+  <section class="card">
+    <h2>Historical sampling</h2>
+    <div id="samplingPanel"></div>
+  </section>
+  <section class="card">
+    <h2>Credit score limits</h2>
+    <div id="scorePanel"></div>
+  </section>
+  <section class="card">
     <h2>Report facts</h2>
     <div id="facts"></div>
   </section>
 </div>
+
+<section class="card">
+  <h2>How verification works</h2>
+  <p>Verification answers five separate questions, and each one gets its
+  own status. A report can pass four and fail one, and the page says so
+  plainly.</p>
+  <p><strong>Source data.</strong> The disclosure package holds a snapshot
+  of the wallet history. The verifier hashes that snapshot and compares it
+  with the data hash published onchain. If they match, the data is the data
+  that was published.</p>
+  <p><strong>Calculations.</strong> The verifier reruns the claims, the
+  credit score and the wallet link proofs from the snapshot, using the
+  published policy. If the rerun gives the same answers as the report, the
+  calculations reproduce.</p>
+  <p><strong>AI attestation.</strong> The AI analysis ran inside a trusted
+  enclave, and its attestation is checked on its own. A nonce match alone
+  does not verify it. The panel shows which of the nonce, quote, signature
+  and measurements were actually checked.</p>
+  <p><strong>Report integrity.</strong> The report, evidence and policy
+  hashes are compared with the onchain record, the disclosure is checked
+  against the report commitment, and the registry is asked whether the
+  claim is still valid. A report that was revoked or expired fails here
+  even if everything else passes.</p>
+  <p><strong>Privacy.</strong> The public report carries thresholds and a
+  score band only, never exact values, and the wallet commitment uses a
+  fresh salt per report. The panel says what the public report discloses
+  and what it keeps private.</p>
+</section>
+
+<section class="card">
+  <h2>What the verifier can and cannot learn</h2>
+  <p><strong>You can learn:</strong> whether the disclosed history supports
+  the claims, whether the score reproduces, whether the report is the one
+  that was published, whether it is still valid, and what the public report
+  discloses.</p>
+  <p><strong>You cannot learn:</strong> the real world identity behind the
+  wallet, whether a counterparty is independent of the prover, or anything
+  about data that never touched the chain. The score measures observable
+  onchain activity only. It is not a guarantee of repayment.</p>
+  <p><strong>What you see that the public does not:</strong> the wallet
+  address and the exact values, because the prover sent you the disclosure
+  package. Do not republish them. And one limit stays: the registry record
+  names the publishing wallet as owner, so claims from one wallet can still
+  be linked through the registry even though the report commitments cannot
+  be matched.</p>
+</section>
 </main>
 
 <footer class="site-footer">
@@ -270,7 +343,20 @@ touched the chain. A report with no AI summary means "not analysed", not
   function hashedPayload(report) {
     var payload = {};
     for (var k in report) {
-      if (k !== 'reportHash' && k !== 'evidenceHash' && k !== 'policyHash') payload[k] = report[k];
+      if (k !== 'reportHash' && k !== 'evidenceHash' && k !== 'policyHash' && k !== 'sampling') payload[k] = report[k];
+    }
+    // Derived score fields are excluded from the hashed payload,
+    // mirror of src/report.js: they are deterministic functions of
+    // the data-hash-pinned snapshots, and the verifier recomputes
+    // them (sampling and score checks), so their integrity is
+    // anchored through the evidence hash. This keeps reports
+    // published before these fields existed verifiable.
+    if (payload.score && typeof payload.score === 'object' && !Array.isArray(payload.score)) {
+      var hashedScore = {};
+      for (var sk in payload.score) {
+        if (sk !== 'riskFlags' && sk !== 'counterpartySummary' && sk !== 'disclaimer') hashedScore[sk] = payload.score[sk];
+      }
+      payload.score = hashedScore;
     }
     return payload;
   }
@@ -734,7 +820,457 @@ touched the chain. A report with no AI summary means "not analysed", not
     }
     push('staked', 'Staked balance held', aggregateStaked(wallets) > 0n ? 50 : 0, 50, true);
     var value = components.reduce(function (sum, c) { return sum + c.points; }, 0);
-    return { version: version, value: value, band: bandFor(value), components: components };
+    var assessedScore = opts.txWindowDays !== undefined && now !== null;
+    var detectedScore = assessedScore ? detectRiskFlags(snapshotOrBundle, { txWindowDays: opts.txWindowDays, nowNs: nowNs }) : { flags: [] };
+    var labelsScore = assessedScore ? labelCounterparties(snapshotOrBundle, { txWindowDays: opts.txWindowDays, nowNs: nowNs }) : [];
+    return {
+      version: version,
+      value: value,
+      band: bandFor(value),
+      components: components,
+      riskFlags: detectedScore.flags,
+      counterpartyLabels: labelsScore,
+      counterpartySummary: counterpartySummary(labelsScore),
+      disclaimer: SCORE_DISCLAIMER
+    };
+  }
+
+  // --- Balance-sampling evidence: inline mirror of src/sampling.js ---
+  // Same thresholds, same record shape, same estimation rule.
+  // Samples are point-in-time readings only; see src/sampling.js.
+  var WIDE_INTERVAL_BLOCKS = 3600;
+  var MIN_MEANINGFUL_SAMPLES = 4;
+  var SAMPLING_LIMITATION = 'Balance samples are point-in-time readings only. They show the balance at the sampled blocks; they do not prove the balance was held continuously between samples.';
+  var NS_PER_BLOCK_ESTIMATE = 1000000000n;
+
+  function samplingToBigInt(value, label) {
+    try {
+      var b = BigInt(value);
+      if (b < 0n) throw new Error('negative');
+      return b;
+    } catch (e) {
+      throw new Error('sampling: ' + label + ' must be a non-negative integer, got ' + JSON.stringify(value));
+    }
+  }
+
+  function samplingTimestamp(value, label) {
+    if (value === undefined || value === null) return null;
+    return samplingToBigInt(value, label).toString();
+  }
+
+  function samplingEstimateAnchor(wallets) {
+    var txs = unionTxs(wallets);
+    var anchor = null;
+    for (var i = 0; i < txs.length; i++) {
+      var tx = txs[i];
+      if (!Number.isInteger(tx.blockHeight)) continue;
+      var ts = samplingTimestamp(tx.blockTimestampNs, 'tx.blockTimestampNs');
+      if (ts === null) continue;
+      if (anchor === null || tx.blockHeight > anchor.blockHeight) anchor = { blockHeight: tx.blockHeight, timestampNs: BigInt(ts) };
+    }
+    return anchor;
+  }
+
+  function findSample(list, height) {
+    for (var i = 0; i < list.length; i++) if (list[i].blockHeight === height) return list[i];
+    return null;
+  }
+
+  function describeSampling(snapshotOrBundle, requested) {
+    var wallets = normalizeBundle(snapshotOrBundle);
+    var req = requested && typeof requested === 'object' && !Array.isArray(requested) ? requested : {};
+    var samplesRequested = null;
+    var recordedMissing = [];
+    if (Number.isInteger(req.samplesRequested) && req.samplesRequested >= 0) {
+      samplesRequested = req.samplesRequested;
+    } else if (wallets[0] && wallets[0].sampling && Number.isInteger(wallets[0].sampling.samplesRequested) && wallets[0].sampling.samplesRequested >= 0) {
+      samplesRequested = wallets[0].sampling.samplesRequested;
+    }
+    if (Array.isArray(req.missingHeights)) recordedMissing = req.missingHeights;
+    else if (wallets[0] && wallets[0].sampling && Array.isArray(wallets[0].sampling.missingHeights)) recordedMissing = wallets[0].sampling.missingHeights;
+    var requestedHeights = Array.isArray(req.requestedHeights) ? req.requestedHeights : [];
+    var perWallet = wallets.map(function (w) {
+      var list = [];
+      var samples = Array.isArray(w.balanceSamples) ? w.balanceSamples : [];
+      for (var i = 0; i < samples.length; i++) {
+        var s = samples[i];
+        if (!Number.isInteger(s.blockHeight) || s.blockHeight < 0) throw new Error('sampling: balanceSample.blockHeight must be a non-negative integer');
+        var amount = samplingToBigInt(s.amount, 'balanceSample.amount');
+        var timestampNs = samplingTimestamp(s.blockTimestampNs, 'balanceSample.blockTimestampNs');
+        if (findSample(list, s.blockHeight) !== null) throw new Error('sampling: duplicate balance sample at block height ' + s.blockHeight);
+        list.push({ blockHeight: s.blockHeight, amount: amount, blockTimestampNs: timestampNs });
+      }
+      return list;
+    });
+    var unionHeights = [];
+    perWallet.forEach(function (list) {
+      list.forEach(function (s) { if (unionHeights.indexOf(s.blockHeight) < 0) unionHeights.push(s.blockHeight); });
+    });
+    unionHeights.sort(function (a, b) { return a - b; });
+    var completeHeights = unionHeights.filter(function (h) {
+      return perWallet.every(function (list) { return findSample(list, h) !== null; });
+    });
+    var missingMap = {};
+    requestedHeights.forEach(function (h) { if (unionHeights.indexOf(h) < 0) missingMap[h] = true; });
+    unionHeights.forEach(function (h) { if (completeHeights.indexOf(h) < 0) missingMap[h] = true; });
+    recordedMissing.forEach(function (h) { if (Number.isInteger(h) && h >= 0) missingMap[h] = true; });
+    if (completeHeights.length >= 2) {
+      var gaps = [];
+      for (var gi = 1; gi < completeHeights.length; gi++) gaps.push(completeHeights[gi] - completeHeights[gi - 1]);
+      var step = Math.min.apply(null, gaps);
+      if (step > 0) {
+        for (var i2 = 1; i2 < completeHeights.length; i2++) {
+          var gap = completeHeights[i2] - completeHeights[i2 - 1];
+          if (gap % step === 0 && gap > step) {
+            for (var k = 1; k < gap / step; k++) missingMap[completeHeights[i2 - 1] + k * step] = true;
+          }
+        }
+      }
+    }
+    var missingHeights = Object.keys(missingMap).map(function (x) { return Number(x); }).sort(function (a, b) { return a - b; });
+    var intervalBlocks = null;
+    if (completeHeights.length >= 2) {
+      intervalBlocks = 0;
+      for (var i3 = 1; i3 < completeHeights.length; i3++) intervalBlocks = Math.max(intervalBlocks, completeHeights[i3] - completeHeights[i3 - 1]);
+    }
+    var lowestObservedSampledBalance = null;
+    if (completeHeights.length > 0) {
+      var min = null;
+      completeHeights.forEach(function (h) {
+        var sum = perWallet.reduce(function (acc, list) { return acc + findSample(list, h).amount; }, 0n);
+        if (min === null || sum < min) min = sum;
+      });
+      lowestObservedSampledBalance = min.toString();
+    }
+    var sampleTimestamps = null;
+    var timestampSource = 'unavailable';
+    if (completeHeights.length > 0) {
+      var anchor = samplingEstimateAnchor(wallets);
+      var entries = [];
+      var allRpc = true;
+      var anyTimestamp = false;
+      completeHeights.forEach(function (h) {
+        var stored = null;
+        for (var wi = 0; wi < perWallet.length; wi++) {
+          var found = findSample(perWallet[wi], h);
+          if (found && found.blockTimestampNs !== null) { stored = found.blockTimestampNs; break; }
+        }
+        if (stored !== null) {
+          entries.push({ blockHeight: h, timestampNs: stored, source: 'rpc' });
+          anyTimestamp = true;
+        } else if (anchor !== null) {
+          var estimated = (anchor.timestampNs + BigInt(h - anchor.blockHeight) * NS_PER_BLOCK_ESTIMATE).toString();
+          entries.push({ blockHeight: h, timestampNs: estimated, source: 'estimated' });
+          allRpc = false;
+          anyTimestamp = true;
+        } else {
+          entries.push({ blockHeight: h, timestampNs: null, source: 'unavailable' });
+          allRpc = false;
+        }
+      });
+      if (anyTimestamp) {
+        sampleTimestamps = entries;
+        timestampSource = allRpc ? 'rpc' : 'estimated';
+      } else {
+        sampleTimestamps = null;
+        timestampSource = 'unavailable';
+      }
+    }
+    var sampleCount = completeHeights.length;
+    var completeness = 'none';
+    if (sampleCount > 0) {
+      completeness = missingHeights.length > 0 || (samplesRequested !== null && sampleCount < samplesRequested) ? 'partial' : 'complete';
+    }
+    var wideIntervalWarning = null;
+    if (sampleCount > 0) {
+      var tooFew = sampleCount < MIN_MEANINGFUL_SAMPLES;
+      var tooWide = intervalBlocks !== null && intervalBlocks > WIDE_INTERVAL_BLOCKS;
+      if (tooFew || tooWide) {
+        var reason = tooFew && tooWide ? 'both' : tooFew ? 'too_few_samples' : 'interval_too_wide';
+        var message = reason === 'both'
+          ? 'Only ' + sampleCount + ' balance sample(s) over the window with gaps up to ' + intervalBlocks + ' blocks: the balance was observed too rarely to call it sustained.'
+          : reason === 'too_few_samples'
+            ? 'Only ' + sampleCount + ' balance sample(s) over the window (fewer than ' + MIN_MEANINGFUL_SAMPLES + '): too few readings to call the balance sustained.'
+            : 'Balance samples are up to ' + intervalBlocks + ' blocks apart (over ' + WIDE_INTERVAL_BLOCKS + ' blocks, about 1 hour): the balance was unobserved for over an hour at a stretch.';
+        wideIntervalWarning = { reason: reason, intervalBlocks: intervalBlocks, thresholdBlocks: WIDE_INTERVAL_BLOCKS, sampleCount: sampleCount, minSamples: MIN_MEANINGFUL_SAMPLES, message: message };
+      }
+    }
+    var windowHours = wallets[0] && typeof wallets[0].balanceSampleWindowHours === 'number' ? wallets[0].balanceSampleWindowHours : null;
+    return {
+      windowHours: windowHours,
+      intervalBlocks: intervalBlocks,
+      sampleCount: sampleCount,
+      oldestBlock: sampleCount > 0 ? completeHeights[0] : null,
+      newestBlock: sampleCount > 0 ? completeHeights[completeHeights.length - 1] : null,
+      sampleTimestamps: sampleTimestamps,
+      timestampSource: timestampSource,
+      lowestObservedSampledBalance: lowestObservedSampledBalance,
+      completeness: completeness,
+      missingHeights: missingHeights,
+      samplesRequested: samplesRequested,
+      wideIntervalWarning: wideIntervalWarning,
+      limitation: SAMPLING_LIMITATION
+    };
+  }
+
+  // --- Manipulation detection: inline mirror of src/manipulation.js ---
+  // Same thresholds, same flags, same labels. Details never name an
+  // account id, so flags are safe to publish in the public report.
+  var SCORE_DISCLAIMER = 'This score measures observable onchain financial activity only. It is not a guarantee of repayment, identity, beneficial ownership, or creditworthiness.';
+  var MIN_CIRCULAR_YOCTO = 100000000000000000000000n;
+  var CIRCULAR_HIGH_YOCTO = 1000000000000000000000000n;
+  var REPEAT_MIN_COUNT = 3;
+  var REPEAT_HIGH_COUNT = 5;
+  var REPEAT_HIGH_YOCTO = 10000000000000000000000000n;
+  var CONCENTRATION_MIN_TXS = 2;
+  var SHARED_FUNDER_MIN_WALLETS = 2;
+  var MAX_CYCLE_LENGTH = 4;
+  var MAX_CYCLES_REPORTED = 3;
+  var MAX_REPEAT_GROUPS_REPORTED = 3;
+  var YOCTO_PER_NEAR = 1000000000000000000000000n;
+
+  function fmtNear(yocto) {
+    var v = BigInt(yocto);
+    var whole = v / YOCTO_PER_NEAR;
+    var frac = v % YOCTO_PER_NEAR;
+    if (frac === 0n) return whole.toString();
+    var six = frac.toString();
+    while (six.length < 24) six = '0' + six;
+    six = six.slice(0, 6).replace(/0+$/, '');
+    return whole.toString() + '.' + six;
+  }
+
+  function manipulationWindowTxs(wallets, txWindowDays, nowNs) {
+    if (txWindowDays === undefined || nowNs === undefined || nowNs === null) return null;
+    var days = txWindowDays;
+    if (typeof days !== 'number' || !Number.isInteger(days) || days < 0) throw new Error('manipulation: txWindowDays must be a non-negative integer number of days');
+    var now = BigInt(nowNs);
+    var start = now - BigInt(days) * 86400n * 1000000000n;
+    return unionTxs(wallets).filter(function (tx) {
+      var ts = BigInt(tx.blockTimestampNs);
+      return ts >= start && ts <= now && tx.status === 'Success';
+    });
+  }
+
+  function manipulationBundleTxs(wallets, txWindowDays, nowNs) {
+    var all = manipulationWindowTxs(wallets, txWindowDays, nowNs);
+    if (all === null) return null;
+    var own = {};
+    wallets.forEach(function (w) { own[w.account.accountId] = true; });
+    return all.filter(function (tx) { return own[tx.senderId] || own[tx.receiverId]; });
+  }
+
+  function detectRiskFlags(snapshotOrBundle, opts) {
+    opts = opts || {};
+    var wallets = normalizeBundle(snapshotOrBundle);
+    var txs = manipulationBundleTxs(wallets, opts.txWindowDays, opts.nowNs);
+    if (txs === null) return { flags: [], suspicious: {} };
+    var own = {};
+    wallets.forEach(function (w) { own[w.account.accountId] = true; });
+    function isExternal(tx) {
+      return (own[tx.senderId] || own[tx.receiverId]) && (!own[tx.senderId] || !own[tx.receiverId]);
+    }
+    var flags = [];
+    var suspicious = {};
+    var internal = txs.filter(function (tx) { return own[tx.senderId] && own[tx.receiverId]; });
+    if (internal.length > 0) {
+      flags.push({
+        type: 'internal_transfers',
+        detail: internal.length + ' transfer(s) between the bundle\'s own wallets in the window; internal transfers earn no activity, volume or diversity points.',
+        severity: 'low'
+      });
+    }
+    var external = txs.filter(isExternal);
+    var flows = {};
+    external.forEach(function (tx) {
+      var other = own[tx.senderId] ? tx.receiverId : tx.senderId;
+      var entry = flows[other] || { out: 0n, in: 0n };
+      if (own[tx.senderId]) entry.out += BigInt(tx.amountYocto);
+      else entry.in += BigInt(tx.amountYocto);
+      flows[other] = entry;
+    });
+    Object.keys(flows).sort().forEach(function (other) {
+      var flow = flows[other];
+      var small = flow.out < flow.in ? flow.out : flow.in;
+      var big = flow.out > flow.in ? flow.out : flow.in;
+      if (small >= MIN_CIRCULAR_YOCTO && small * 2n >= big) {
+        var pct = big === 0n ? 0 : Number((small * 100n) / big);
+        var high = small >= CIRCULAR_HIGH_YOCTO || small * 10n >= big * 9n;
+        flags.push({
+          type: 'circular_flow',
+          detail: 'Value sent to an outside counterparty mostly came back within the window: ' + fmtNear(flow.out) + ' NEAR out, ' + fmtNear(flow.in) + ' NEAR back (' + pct + '% returned).',
+          severity: high ? 'high' : 'medium'
+        });
+        suspicious[other] = true;
+      }
+    });
+    var edges = {};
+    var adjacency = {};
+    txs.forEach(function (tx) {
+      var key = tx.senderId + '\0' + tx.receiverId;
+      var total = (edges[key] || 0n) + BigInt(tx.amountYocto);
+      edges[key] = total;
+      if (!adjacency[tx.senderId]) adjacency[tx.senderId] = {};
+      adjacency[tx.senderId][tx.receiverId] = total;
+    });
+    function edgeTotal(a, b) { return edges[a + '\0' + b] || 0n; }
+    var nodeMap = {};
+    Object.keys(adjacency).forEach(function (s) {
+      nodeMap[s] = true;
+      Object.keys(adjacency[s]).forEach(function (r) { nodeMap[r] = true; });
+    });
+    var nodes = Object.keys(nodeMap).sort();
+    var found = {};
+    if (nodes.length <= 64 && Object.keys(edges).length <= 256) {
+      var dfs = function (start, current, path, visited) {
+        if (path.length >= 3 && path.length <= MAX_CYCLE_LENGTH) {
+          if (adjacency[current] && adjacency[current][start] !== undefined) {
+            var cycle = path.slice();
+            var hasOwn = false;
+            for (var ci = 0; ci < cycle.length; ci++) if (own[cycle[ci]]) { hasOwn = true; break; }
+            if (hasOwn) {
+              var legs = [];
+              for (var li = 0; li < cycle.length; li++) {
+                var from = cycle[li];
+                var to = li + 1 < cycle.length ? cycle[li + 1] : start;
+                legs.push(edgeTotal(from, to));
+              }
+              var minLeg = legs[0];
+              for (var mi = 1; mi < legs.length; mi++) if (legs[mi] < minLeg) minLeg = legs[mi];
+              if (minLeg >= MIN_CIRCULAR_YOCTO) {
+                var smallest = cycle.slice().sort()[0];
+                var idx = cycle.indexOf(smallest);
+                var rotated = cycle.slice(idx).concat(cycle.slice(0, idx));
+                var key = rotated.join('>');
+                if (found[key] === undefined || minLeg > found[key]) found[key] = minLeg;
+              }
+            }
+          }
+        }
+        if (path.length >= MAX_CYCLE_LENGTH) return;
+        var nexts = adjacency[current] ? Object.keys(adjacency[current]).sort() : [];
+        for (var ni = 0; ni < nexts.length; ni++) {
+          var next = nexts[ni];
+          if (visited[next]) continue;
+          visited[next] = true;
+          path.push(next);
+          dfs(start, next, path, visited);
+          path.pop();
+          delete visited[next];
+        }
+      };
+      for (var si = 0; si < nodes.length; si++) {
+        var visited0 = {};
+        visited0[nodes[si]] = true;
+        dfs(nodes[si], nodes[si], [nodes[si]], visited0);
+      }
+    }
+    var cycleKeys = Object.keys(found).sort(function (a, b) {
+      if (found[a] === found[b]) return a < b ? -1 : 1;
+      return found[a] > found[b] ? -1 : 1;
+    }).slice(0, MAX_CYCLES_REPORTED);
+    cycleKeys.forEach(function (key) {
+      var minLeg = found[key];
+      var hops = key.split('>').length;
+      flags.push({
+        type: 'circular_chain',
+        detail: 'Funds left a bundle wallet and returned through a ' + hops + '-hop chain within the window; at least ' + fmtNear(minLeg) + ' NEAR completed the loop.',
+        severity: minLeg >= CIRCULAR_HIGH_YOCTO ? 'high' : 'medium'
+      });
+      key.split('>').forEach(function (node) { if (!own[node]) suspicious[node] = true; });
+    });
+    var funders = {};
+    txs.forEach(function (tx) {
+      if (!own[tx.receiverId] || own[tx.senderId]) return;
+      if (!funders[tx.senderId]) funders[tx.senderId] = {};
+      funders[tx.senderId][tx.receiverId] = true;
+    });
+    Object.keys(funders).sort().forEach(function (funder) {
+      var fundedCount = Object.keys(funders[funder]).length;
+      if (fundedCount >= SHARED_FUNDER_MIN_WALLETS) {
+        flags.push({
+          type: 'shared_funder',
+          detail: 'One outside account sent funds to ' + fundedCount + ' wallets in this bundle: those wallets share a funding source.',
+          severity: 'medium'
+        });
+        suspicious[funder] = true;
+      }
+    });
+    var counts = {};
+    external.forEach(function (tx) {
+      var other = own[tx.senderId] ? tx.receiverId : tx.senderId;
+      counts[other] = (counts[other] || 0) + 1;
+    });
+    if (external.length >= CONCENTRATION_MIN_TXS) {
+      var ranked = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a] || (a < b ? -1 : 1); });
+      var top = ranked[0];
+      var topCount = counts[top];
+      if (BigInt(topCount) * 5n >= BigInt(external.length) * 4n) {
+        var pct2 = Math.floor((topCount * 100) / external.length);
+        flags.push({
+          type: 'concentrated_counterparty',
+          detail: pct2 + '% of external transactions in the window (' + topCount + ' of ' + external.length + ') are with a single outside counterparty.',
+          severity: 'medium'
+        });
+        suspicious[top] = true;
+      }
+    }
+    var groups = {};
+    txs.forEach(function (tx) {
+      var key = tx.senderId + '\0' + tx.receiverId + '\0' + tx.amountYocto;
+      var entry = groups[key] || { count: 0, total: 0n };
+      entry.count += 1;
+      entry.total += BigInt(tx.amountYocto);
+      groups[key] = entry;
+    });
+    var repeated = Object.keys(groups)
+      .filter(function (k) { return groups[k].count >= REPEAT_MIN_COUNT; })
+      .sort(function (a, b) {
+        if (groups[b].count !== groups[a].count) return groups[b].count - groups[a].count;
+        if (groups[b].total > groups[a].total) return 1;
+        if (groups[b].total < groups[a].total) return -1;
+        return a < b ? -1 : a > b ? 1 : 0;
+      })
+      .slice(0, MAX_REPEAT_GROUPS_REPORTED);
+    repeated.forEach(function (key) {
+      var group = groups[key];
+      var parts = key.split('\0');
+      var amountYocto = parts[2];
+      flags.push({
+        type: 'repeated_transfers',
+        detail: 'The same amount (' + fmtNear(amountYocto) + ' NEAR) moved between the same two accounts ' + group.count + ' times in the window (total ' + fmtNear(group.total) + ' NEAR).',
+        severity: group.count >= REPEAT_HIGH_COUNT || group.total >= REPEAT_HIGH_YOCTO ? 'high' : 'medium'
+      });
+      if (!own[parts[0]]) suspicious[parts[0]] = true;
+      if (!own[parts[1]]) suspicious[parts[1]] = true;
+    });
+    flags.sort(function (a, b) { return a.type < b.type ? -1 : a.type > b.type ? 1 : a.detail < b.detail ? -1 : 1; });
+    return { flags: flags, suspicious: suspicious };
+  }
+
+  function labelCounterparties(snapshotOrBundle, opts) {
+    opts = opts || {};
+    var wallets = normalizeBundle(snapshotOrBundle);
+    var txs = manipulationBundleTxs(wallets, opts.txWindowDays, opts.nowNs);
+    if (txs === null) return [];
+    var own = {};
+    wallets.forEach(function (w) { own[w.account.accountId] = true; });
+    var detected = detectRiskFlags(snapshotOrBundle, { txWindowDays: opts.txWindowDays, nowNs: opts.nowNs });
+    var accounts = {};
+    txs.forEach(function (tx) { accounts[tx.senderId] = true; accounts[tx.receiverId] = true; });
+    return Object.keys(accounts).sort().map(function (account) {
+      return { account: account, label: own[account] ? 'own' : detected.suspicious[account] ? 'suspicious' : 'unknown' };
+    });
+  }
+
+  function counterpartySummary(labels) {
+    var summary = { own: 0, unknown: 0, suspicious: 0 };
+    labels.forEach(function (entry) {
+      if (entry.label === 'own') summary.own += 1;
+      else if (entry.label === 'suspicious') summary.suspicious += 1;
+      else summary.unknown += 1;
+    });
+    return summary;
   }
 
   // --- Verify: mirror of src/verify-report.js ---
@@ -746,8 +1282,449 @@ touched the chain. A report with no AI summary means "not analysed", not
     return typeof hash === 'string' ? hash : '(missing)';
   }
 
+  // --- Verification model: five separate statuses ---
+  // Mirror of the same section in src/verify-report.js and
+  // public/js/verify-browser.js (ES5 style here, because this file
+  // is a single self contained page script). The ten checks stay,
+  // plus one status field per question a verifier actually asks.
+  // The three copies must stay in sync; the parity tests compare
+  // the full result objects.
+  var SHA256_HEX = /^[0-9a-f]{64}$/;
+
+  function checkPassed(checks, name) {
+    var found = null;
+    for (var i = 0; i < checks.length; i++) {
+      if (checks[i].check === name) { found = checks[i]; break; }
+    }
+    return !!found && found.passed;
+  }
+
+  // Sampling evidence comes from describeSampling (the same record
+  // the report and snapshots carry); the old deriveSampling that
+  // inferred a median-gap interval and a ratio completeness was
+  // replaced when the sampling work landed.
+  // --- Score limits: consumed from the recomputed score ---
+  //
+  // computeScore (inlined above) already returns riskFlags,
+  // counterpartyLabels, counterpartySummary and disclaimer. The
+  // derivation section below passes them through from the recomputed
+  // score, with per-component points stripped (the public report
+  // carries a band only). Nothing here invents a risk flag or a
+  // counterparty label.
+
+  function deriveAttestationStatus(attestationInput, report, nowNs) {
+    function tri(v) { return v === true ? true : v === false ? false : null; }
+    function build(patch) {
+      var base = {
+        status: 'UNVERIFIED',
+        method: null,
+        model: null,
+        nonceMatched: null,
+        quoteVerified: null,
+        signatureVerified: null,
+        measurementsChecked: null,
+        expiresAt: null,
+        detail: ''
+      };
+      return Object.assign(base, patch);
+    }
+    if (isObject(attestationInput)) {
+      var method = typeof attestationInput.method === 'string' ? attestationInput.method : null;
+      var model = typeof attestationInput.model === 'string' ? attestationInput.model : null;
+      var nonceMatched = tri(attestationInput.nonceMatched);
+      var quoteVerified = tri(attestationInput.quoteVerified);
+      var signatureVerified = tri(attestationInput.signatureVerified);
+      var measurementsChecked = tri(attestationInput.measurementsChecked);
+      var expiresAt = typeof attestationInput.expiresAt === 'string' ? attestationInput.expiresAt : null;
+      var details = typeof attestationInput.details === 'string' ? attestationInput.details : null;
+      var error = typeof attestationInput.error === 'string' ? attestationInput.error : null;
+      var common = { method: method, model: model, nonceMatched: nonceMatched, quoteVerified: quoteVerified, signatureVerified: signatureVerified, measurementsChecked: measurementsChecked, expiresAt: expiresAt };
+      if (attestationInput.status === 'VERIFIED') {
+        var allTrue = nonceMatched === true && quoteVerified === true && signatureVerified === true && measurementsChecked === true;
+        var anyFalse = nonceMatched === false || quoteVerified === false || signatureVerified === false || measurementsChecked === false;
+        if (allTrue) {
+          // A VERIFIED result whose evidence is past its validity
+          // period is EXPIRED, not VERIFIED (same rule as
+          // attestationStatusAt in attestation-verify.js).
+          var expired = false;
+          try {
+            if (typeof expiresAt === 'string' && expiresAt) {
+              expired = Date.parse(expiresAt) <= Number(BigInt(nowNs) / 1000000n);
+            }
+          } catch (e) {
+            expired = false;
+          }
+          if (expired) {
+            return build(Object.assign({}, common, {
+              status: 'EXPIRED',
+              detail: details || 'The attestation evidence is past its validity period.'
+            }));
+          }
+          return build(Object.assign({}, common, {
+            status: 'VERIFIED',
+            detail: details || 'The TEE attestation was cryptographically verified: nonce, quote, signature and measurements all checked.'
+          }));
+        }
+        if (anyFalse) {
+          return build(Object.assign({}, common, {
+            status: 'FAILED',
+            detail: details || error || 'The attestation was reported verified but one of the required checks failed, so it is not treated as verified.'
+          }));
+        }
+        return build(Object.assign({}, common, {
+          status: 'UNVERIFIED',
+          detail: details || 'The attestation was reported verified but not every required check was confirmed, so it is not treated as verified.'
+        }));
+      }
+      if (attestationInput.status === 'FAILED') {
+        return build(Object.assign({}, common, { status: 'FAILED', detail: details || error || 'The attestation check failed.' }));
+      }
+      if (attestationInput.status === 'EXPIRED') {
+        return build(Object.assign({}, common, { status: 'EXPIRED', detail: details || 'The attestation expired.' }));
+      }
+      return build(Object.assign({}, common, { status: 'UNVERIFIED', detail: details || 'The attestation was not verified.' }));
+    }
+    var ai = report.aiSummary;
+    if (!isObject(ai)) {
+      return build({
+        detail: 'No AI summary is attached to this report, so there is no attestation to check. A report does not need an AI summary to verify.'
+      });
+    }
+    var aiModel = typeof ai.model === 'string' ? ai.model : null;
+    var att = ai.attestation;
+    if (!isObject(att)) {
+      return build({
+        method: 'NEAR AI attestation preflight, nonce echo',
+        model: aiModel,
+        detail: 'An AI analysis is attached but it carries no attestation record, so the attestation was not checked.'
+      });
+    }
+    var attNonce = tri(att.nonceMatched);
+    if (att.verifiable === true && attNonce === true) {
+      return build({
+        method: 'NEAR AI attestation preflight, nonce echo',
+        model: aiModel,
+        nonceMatched: true,
+        detail: 'The analysis recorded that its nonce matched when it ran, but this verifier did not recheck the TEE quote, signature or measurements. The full attestation evidence is not in the report, only its hash, so the quote cannot be rechecked from the report alone.'
+      });
+    }
+    return build({
+      status: 'FAILED',
+      method: 'NEAR AI attestation preflight, nonce echo',
+      model: aiModel,
+      nonceMatched: attNonce,
+      detail: 'The attestation did not verify when the analysis ran, so the AI analysis is unattested. The report itself can still verify, only the AI opinion lacks attestation.'
+    });
+  }
+
+  // One summary headline for the page banner, derived from the five
+  // statuses, never from the valid boolean alone.
+  function summariseVerification(result) {
+    function field(name) {
+      return result && result[name] && typeof result[name] === 'object' ? result[name] : {};
+    }
+    var integrity = field('report_integrity_status');
+    var source = field('source_status');
+    var computation = field('computation_status');
+    var attestation = field('attestation_status');
+    var privacy = field('privacy_status');
+    var notes = [];
+    var failed = [];
+    var headline;
+    var tone;
+    if (integrity.status === 'REVOKED') {
+      headline = 'Revoked: this report was withdrawn from the registry.';
+      tone = 'bad';
+      failed.push('report_integrity_status');
+    } else if (integrity.status === 'EXPIRED') {
+      headline = 'Expired: this report is past its expiry date.';
+      tone = 'bad';
+      failed.push('report_integrity_status');
+    } else if (integrity.status === 'FAILED') {
+      headline = 'Does not verify: the report does not match its published record.';
+      tone = 'bad';
+      failed.push('report_integrity_status');
+    } else if (source.status === 'FAILED') {
+      headline = 'Does not verify: the disclosed data does not match the published data hash.';
+      tone = 'bad';
+      failed.push('source_status');
+    } else if (computation.status === 'FAILED') {
+      headline = 'Does not verify: the claims, score, sampling or link proofs did not reproduce from the disclosure.';
+      tone = 'bad';
+      failed.push('computation_status');
+    } else if (result.valid === false) {
+      headline = 'Does not verify: one or more checks failed, see the check list below.';
+      tone = 'bad';
+    } else if (attestation.status === 'FAILED') {
+      headline = 'Checks pass, but the AI attestation failed.';
+      tone = 'warn';
+      failed.push('attestation_status');
+    } else if (attestation.status === 'EXPIRED') {
+      headline = 'Checks pass, but the AI attestation expired.';
+      tone = 'warn';
+      failed.push('attestation_status');
+    } else if (attestation.status === 'UNVERIFIED') {
+      headline = 'Checks pass, AI attestation not verified.';
+      tone = 'warn';
+    } else if (source.status === 'UNVERIFIED' || computation.status === 'UNVERIFIED' || integrity.status === 'UNVERIFIED') {
+      headline = 'Checks pass, but one status could not be confirmed.';
+      tone = 'warn';
+    } else {
+      headline = 'Verified: every check passed.';
+      tone = 'ok';
+    }
+    if (source.status === 'FAILED') notes.push('Source data: ' + (source.detail || 'failed.'));
+    if (computation.status === 'FAILED') notes.push('Computation: ' + (computation.detail || 'failed.'));
+    if (integrity.status === 'FAILED' || integrity.status === 'REVOKED' || integrity.status === 'EXPIRED') {
+      notes.push('Report integrity: ' + (integrity.detail || 'failed.'));
+    }
+    if (integrity.status === 'UNVERIFIED') {
+      notes.push('Report integrity: the registry did not confirm the claim, see the integrity panel.');
+    }
+    if (attestation.status === 'FAILED') notes.push('Attestation: the AI attestation failed, see the attestation panel.');
+    if (attestation.status === 'EXPIRED') notes.push('Attestation: the AI attestation expired, see the attestation panel.');
+    if (attestation.status === 'UNVERIFIED') {
+      notes.push('Attestation: not verified, see the attestation panel for what was and was not checked.');
+    }
+    if (privacy.status === 'PARTIALLY_DISCLOSED') {
+      notes.push('Privacy: the public report discloses more than a predicate report, see the privacy panel.');
+    }
+    if (privacy.status === 'PUBLIC') notes.push('Privacy: the public report names the wallet address, see the privacy panel.');
+    if (result.sampling && result.sampling.wideIntervalWarning) {
+      notes.push('Sampling: the sampling record carries a wide interval warning, see the sampling panel.');
+    }
+    if (result.score && Array.isArray(result.score.riskFlags) && result.score.riskFlags.length > 0) {
+      notes.push('Credit score: this report carries risk flags, see the score panel.');
+    }
+    return { headline: headline, tone: tone, notes: notes, failed: failed };
+  }
+
+  // Format a yoctoNEAR amount as NEAR, floored to 2 decimals so the
+  // display never overstates the amount.
+  function formatNearYocto(yocto) {
+    try {
+      var value = BigInt(yocto);
+      if (value < 0n) return 'unreadable';
+      var hundredths = (value * 100n) / 10n ** 24n;
+      var whole = hundredths / 100n;
+      var cents = hundredths % 100n;
+      if (cents === 0n) return whole.toString() + ' NEAR';
+      if (cents % 10n === 0n) return whole.toString() + '.' + (cents / 10n).toString() + ' NEAR';
+      return whole.toString() + '.' + cents.toString().padStart(2, '0') + ' NEAR';
+    } catch (e) {
+      return 'unreadable';
+    }
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function pillFor(status) {
+    switch (status) {
+      case 'VERIFIED': return { cls: 'ok', label: 'VERIFIED' };
+      case 'PRIVATE': return { cls: 'ok', label: 'PRIVATE' };
+      case 'UNVERIFIED': return { cls: 'warn', label: 'UNVERIFIED' };
+      case 'PARTIALLY_DISCLOSED': return { cls: 'warn', label: 'PARTIALLY DISCLOSED' };
+      case 'FAILED': return { cls: 'bad', label: 'FAILED' };
+      case 'REVOKED': return { cls: 'bad', label: 'REVOKED' };
+      case 'EXPIRED': return { cls: 'bad', label: 'EXPIRED' };
+      case 'PUBLIC': return { cls: 'bad', label: 'PUBLIC' };
+      default: return { cls: 'warn', label: 'UNVERIFIED' };
+    }
+  }
+
+  function pillHtml(status) {
+    var p = pillFor(status);
+    return '<span class="pill ' + p.cls + '">' + p.label + '</span>';
+  }
+
+  function statusRow(label, field) {
+    var status = field && typeof field.status === 'string' ? field.status : 'UNVERIFIED';
+    var detail = field && typeof field.detail === 'string' ? field.detail : 'Not available.';
+    return '<div class="status-row"><div class="status-head"><strong>' + label + '</strong> ' + pillHtml(status) + '</div><div class="status-detail">' + escHtml(detail) + '</div></div>';
+  }
+
+  // Pure panel builder: renders the six panel fragments from a
+  // verifier result and its report. No DOM access. Mirror of
+  // buildStatusPanelsHtml in public/js/verify-browser.js — the two
+  // must produce identical HTML, and the frontend verify model test
+  // asserts it.
+  function buildStatusPanelsHtml(result, report) {
+    var summary = summariseVerification(result);
+    var summaryHtml =
+      statusRow('Source data', result.source_status) +
+      statusRow('Calculations', result.computation_status) +
+      statusRow('AI attestation', result.attestation_status) +
+      statusRow('Report integrity', result.report_integrity_status) +
+      statusRow('Privacy', result.privacy_status);
+    if (summary.notes.length > 0) {
+      summaryHtml += '<div class="status-notes">' + summary.notes.map(function (n) { return '<p>' + escHtml(n) + '</p>'; }).join('') + '</div>';
+    }
+
+    var privacy = result.privacy_status && typeof result.privacy_status === 'object' ? result.privacy_status : {};
+    var pStatus = typeof privacy.status === 'string' ? privacy.status : 'UNVERIFIED';
+    var privacyHtml = statusRow('Privacy status', privacy);
+    privacyHtml += '<p>What the public sees: ';
+    if (pStatus === 'PRIVATE') {
+      privacyHtml += 'thresholds and a score band only, plus the salted wallet commitment. The address never appears in the public report.';
+    } else if (pStatus === 'PARTIALLY_DISCLOSED') {
+      privacyHtml += 'thresholds and a score band, plus the exact values or the unsalted commitment named above. The address itself is not in the public report, but more can be read from it than from a predicate report.';
+    } else if (pStatus === 'PUBLIC') {
+      privacyHtml += 'the wallet address itself, so this report does not keep the wallet private.';
+    } else {
+      privacyHtml += 'not known, the privacy status could not be determined.';
+    }
+    privacyHtml += '</p>';
+    privacyHtml += '<p>What you, the verifier, see: the wallet address and the exact values, because the prover sent you the disclosure package. Do not republish them.</p>';
+    privacyHtml += '<p>Known limit: the registry record names the publishing wallet as owner, and lists every claim that wallet published, so claims from one wallet can still be linked through the registry even though the report commitments cannot be matched.</p>';
+
+    var att = result.attestation_status && typeof result.attestation_status === 'object' ? result.attestation_status : {};
+    var triText = function (v) { return v === true ? 'yes' : v === false ? 'no' : 'not checked'; };
+    var attExpires = 'not stated';
+    try {
+      if (typeof att.expiresAt === 'string' && att.expiresAt) {
+        attExpires = new Date(Number(BigInt(att.expiresAt) / 1000000n)).toISOString();
+      }
+    } catch (e) {
+      attExpires = 'not stated';
+    }
+    var attestationHtml = statusRow('Attestation status', att);
+    attestationHtml +=
+      '<div class="table-scroll"><table><tr><th>Check</th><th>Result</th></tr>' +
+      '<tr><td>Method</td><td>' + escHtml(att.method || 'not stated') + '</td></tr>' +
+      '<tr><td>Model</td><td>' + escHtml(att.model || 'not stated') + '</td></tr>' +
+      '<tr><td>Nonce matched</td><td>' + triText(att.nonceMatched) + '</td></tr>' +
+      '<tr><td>Quote verified</td><td>' + triText(att.quoteVerified) + '</td></tr>' +
+      '<tr><td>Signature verified</td><td>' + triText(att.signatureVerified) + '</td></tr>' +
+      '<tr><td>Measurements checked</td><td>' + triText(att.measurementsChecked) + '</td></tr>' +
+      '<tr><td>Expires</td><td>' + escHtml(attExpires) + '</td></tr></table></div>';
+    attestationHtml += '<p>The attestation is the evidence that the AI analysis ran inside a trusted enclave. It is verified only when the nonce, the quote, the signature and the measurements were all checked. A nonce match on its own does not verify the attestation.</p>';
+
+    var integ = result.report_integrity_status && typeof result.report_integrity_status === 'object' ? result.report_integrity_status : {};
+    var iStatus = typeof integ.status === 'string' ? integ.status : 'UNVERIFIED';
+    var expires = 'unreadable';
+    try {
+      expires = new Date(Number(BigInt(report.expiresAt) / 1000000n)).toISOString();
+    } catch (e2) {
+      expires = 'unreadable';
+    }
+    var integrityHtml = statusRow('Report integrity', integ);
+    integrityHtml += '<p>Expires: <span class="mono">' + escHtml(expires) + '</span></p>';
+    if (iStatus === 'VERIFIED') {
+      integrityHtml += '<p>The registry still reports the claim valid.</p>';
+    } else if (iStatus === 'REVOKED') {
+      integrityHtml += '<p>The registry reports the claim invalid. A revoked report must not be relied on, even if every other check passes.</p>';
+    } else if (iStatus === 'EXPIRED') {
+      integrityHtml += '<p>The report is past its expiry date. An expired report must not be relied on, even if every other check passes.</p>';
+    } else if (iStatus === 'FAILED') {
+      integrityHtml += '<p>The report does not match the onchain record, so it is not the report that was published.</p>';
+    } else {
+      integrityHtml += '<p>The registry did not confirm the claim, so revocation could not be checked.</p>';
+    }
+
+    var sampling = result.sampling;
+    var samplingHtml;
+    if (!sampling || sampling.completeness === 'none') {
+      samplingHtml =
+        '<p>No balance samples were disclosed with this report, so there is no sampled history to show.</p>' +
+        '<p>Without samples, a sustained balance claim cannot be checked, because it needs readings at past block heights.</p>';
+    } else {
+      var completenessText =
+        sampling.completeness === 'complete'
+          ? 'complete: every requested reading is present'
+          : sampling.completeness === 'partial'
+            ? 'partial: ' + (sampling.missingHeights && sampling.missingHeights.length > 0 ? 'missing heights ' + sampling.missingHeights.join(', ') : 'fewer readings than requested')
+            : 'not known';
+      var timestampsText = !sampling.sampleTimestamps
+        ? 'not available'
+        : sampling.sampleTimestamps.length + ' reading(s), times ' + (sampling.timestampSource === 'rpc' ? 'read from the chain' : sampling.timestampSource === 'estimated' ? 'estimated from block height' : 'unavailable');
+      samplingHtml =
+        '<div class="table-scroll"><table><tr><th>Reading</th><th>Value</th></tr>' +
+        '<tr><td>Sample count</td><td>' + sampling.sampleCount + '</td></tr>' +
+        '<tr><td>Interval between samples</td><td>' + (sampling.intervalBlocks === null ? 'n/a' : sampling.intervalBlocks + ' blocks') + '</td></tr>' +
+        '<tr><td>Oldest sampled block</td><td>' + sampling.oldestBlock + '</td></tr>' +
+        '<tr><td>Newest sampled block</td><td>' + sampling.newestBlock + '</td></tr>' +
+        '<tr><td>Lowest observed sampled balance</td><td>' + escHtml(formatNearYocto(sampling.lowestObservedSampledBalance)) + '</td></tr>' +
+        '<tr><td>Completeness</td><td>' + escHtml(completenessText) + '</td></tr>' +
+        '<tr><td>Sample times</td><td>' + escHtml(timestampsText) + '</td></tr>' +
+        '<tr><td>Wide interval warning</td><td>' + (sampling.wideIntervalWarning ? 'yes' : 'no') + '</td></tr></table></div>';
+      samplingHtml += '<p>Samples are balance readings at past block heights. The lowest observed sampled balance is what the sustained balance claim measures. Balances between samples are not observed, so a dip that starts and ends between two samples would not show here.</p>';
+      if (sampling.wideIntervalWarning) {
+        samplingHtml += '<p class="warn">Warning: ' + escHtml(sampling.wideIntervalWarning.message) + '</p>';
+      }
+    }
+
+    var score = result.score;
+    // The landed disclaimer comes with the recomputed score; the
+    // hardcoded text is only a fallback when the score did not recompute.
+    var fallbackDisclaimer =
+      '<p>The score measures observable onchain activity only. It is not a guarantee of repayment, and it does not establish real world identity, ownership of counterparties, or creditworthiness.</p>';
+    var scoreHtml;
+    if (!score) {
+      if (report.score) {
+        scoreHtml =
+          '<p>Credit score: band ' + escHtml(report.score.band) + ' (' + escHtml(report.score.version || 'unversioned') + ').</p>' +
+          '<p>The score did not recompute from the disclosure, see the score check above. Do not rely on the band until the score reproduces.</p>' +
+          fallbackDisclaimer;
+      } else {
+        scoreHtml = '<p>This report carries no credit score.</p>' + fallbackDisclaimer;
+      }
+    } else {
+      scoreHtml = '<p>Credit score: band <strong>' + escHtml(score.band) + '</strong> (' + escHtml(score.version) + '), recomputed by this verifier from the disclosure snapshot.</p>';
+      scoreHtml +=
+        '<div class="table-scroll"><table><tr><th>Component</th><th>Max</th><th>Measured</th></tr>' +
+        score.components
+          .map(function (c) { return '<tr><td>' + escHtml(c.label) + '</td><td>' + c.max + '</td><td>' + (c.measured ? 'yes' : 'not measured') + '</td></tr>'; })
+          .join('') +
+        '</table></div>';
+      if (score.riskFlags.length > 0) {
+        scoreHtml +=
+          '<p>Risk flags:</p><ul>' +
+          score.riskFlags
+            .map(function (f) { return '<li><strong>' + escHtml(f.type) + '</strong> (' + escHtml(f.severity) + '): ' + escHtml(f.detail) + '</li>'; })
+            .join('') +
+          '</ul>';
+      } else {
+        scoreHtml += '<p>No risk flags.</p>';
+      }
+      if (score.counterpartyLabels.length > 0) {
+        scoreHtml +=
+          '<p>Counterparties observed in the window:</p><ul>' +
+          score.counterpartyLabels
+            .map(function (l) { return '<li><span class="mono">' + escHtml(l.account) + '</span>: ' + escHtml(l.label) + '</li>'; })
+            .join('') +
+          '</ul>' +
+          '<p>Labels: own means one of the prover\u2019s own wallets; suspicious means the account appears in a risk flag above; unknown means no identity or ownership evidence exists for that account, so independence is not assumed. The verifier cannot tell from an account id alone whether a counterparty is independent of the prover.</p>';
+        if (score.counterpartySummary) {
+          scoreHtml += '<p>Counterparty counts: ' + score.counterpartySummary.own + ' own, ' + score.counterpartySummary.unknown + ' unknown, ' + score.counterpartySummary.suspicious + ' suspicious.</p>';
+        }
+      } else {
+        scoreHtml += '<p>No counterparties were observed in the window.</p>';
+      }
+      var disclaimer =
+        '<p>' +
+        escHtml(
+          typeof score.disclaimer === 'string'
+            ? score.disclaimer
+            : 'The score measures observable onchain activity only. It is not a guarantee of repayment, and it does not establish real world identity, ownership of counterparties, or creditworthiness.'
+        ) +
+        '</p>';
+      scoreHtml += disclaimer;
+    }
+
+    return {
+      summary: summaryHtml,
+      privacy: privacyHtml,
+      attestation: attestationHtml,
+      integrity: integrityHtml,
+      sampling: samplingHtml,
+      score: scoreHtml
+    };
+  }
+
   async function verifyReport(args) {
-    var report = args.report, onchainRecord = args.onchainRecord, disclosurePackage = args.disclosurePackage, policy = args.policy, nowNs = args.nowNs, linkKeyBindings = args.linkKeyBindings;
+    var report = args.report, onchainRecord = args.onchainRecord, disclosurePackage = args.disclosurePackage, policy = args.policy, nowNs = args.nowNs, linkKeyBindings = args.linkKeyBindings, attestation = args.attestation;
     if (!isObject(report)) throw new Error('verifyReport: report must be an object');
     if (!isObject(onchainRecord)) throw new Error('verifyReport: onchainRecord must be an object');
     if (!isObject(disclosurePackage)) throw new Error('verifyReport: disclosurePackage must be an object');
@@ -840,6 +1817,65 @@ touched the chain. A report with no AI summary means "not analysed", not
       check('data_hash', false, 'Could not recompute data hash: ' + err.message);
     }
 
+    // e. The report's sampling record matches the recomputation from
+    // the disclosed snapshots. The record is a derived summary of the
+    // pinned samples, not part of the report hash, so this check is
+    // what stops a report from misstating it. A report that claims no
+    // sampling evidence passes vacuously; a wide interval is a warning
+    // in the detail, never a failure — thin evidence, not false.
+    try {
+      var hasSamples = snapshots.some(function (s) { return Array.isArray(s.balanceSamples) && s.balanceSamples.length > 0; });
+      if (report.sampling === null || report.sampling === undefined) {
+        if (!hasSamples) {
+          check('sampling', true, 'Report claims no sampling evidence, and the disclosure carries no balance samples.');
+        } else {
+          var againNoClaim = describeSampling(bundle);
+          check('sampling', true, 'Report claims no sampling metadata; the disclosure carries ' + againNoClaim.sampleCount + ' sampled balance reading(s) (recomputed, not claimed).');
+        }
+      } else {
+        var again = describeSampling(bundle);
+        var fields = [
+          'windowHours',
+          'intervalBlocks',
+          'sampleCount',
+          'oldestBlock',
+          'newestBlock',
+          'sampleTimestamps',
+          'timestampSource',
+          'lowestObservedSampledBalance',
+          'completeness',
+          'missingHeights',
+          'samplesRequested',
+          'wideIntervalWarning',
+          'limitation'
+        ];
+        var failure = null;
+        for (var fi = 0; fi < fields.length; fi++) {
+          var field = fields[fi];
+          if (canonicalJson(report.sampling[field]) !== canonicalJson(again[field])) {
+            failure = 'Sampling field ' + field + ' differs (report: ' + canonicalJson(report.sampling[field]) + ', recomputed: ' + canonicalJson(again[field]) + ').';
+            break;
+          }
+        }
+        if (failure) {
+          check('sampling', false, failure);
+        } else {
+          var detail =
+            'Sampling evidence reproduced from the disclosure snapshot: ' + again.sampleCount + ' reading(s), ' +
+            'interval ' + (again.intervalBlocks === null ? 'n/a' : again.intervalBlocks + ' blocks') + ', completeness ' + again.completeness + '.';
+          if (again.wideIntervalWarning) {
+            detail += ' WARNING: ' + again.wideIntervalWarning.message;
+          } else {
+            detail += ' No wide-interval warning.';
+          }
+          check('sampling', true, detail);
+        }
+      }
+    } catch (err) {
+      check('sampling', false, 'Sampling recomputation failed: ' + err.message);
+    }
+
+    // f. Re-running the claims engine reproduces the report's claims.
     try {
       if (!Array.isArray(report.claims)) {
         check('claims', false, 'Report claims are not an array.');
@@ -892,6 +1928,15 @@ touched the chain. A report with no AI summary means "not analysed", not
       check('claims', false, 'Claim rerun failed: ' + err.message);
     }
 
+    // g. The deterministic score, when present, recomputes exactly.
+    // Legacy reports (pre-P3) carry the exact value and per-component
+    // points: they must match exactly. Predicate reports carry only
+    // the version, band and component shapes (no value, no points):
+    // the recomputed exact score must fall in the public band and its
+    // components must match on id/label/max/measured. The exact value
+    // is never printed for a predicate report — the band is the result.
+    // A recompute that matches is kept for the score limits panel.
+    var recomputedScore = null;
     try {
       if (report.score === null || report.score === undefined) {
         check('score', true, 'Report carries no score (not scored).');
@@ -901,6 +1946,27 @@ touched the chain. A report with no AI summary means "not analysed", not
         var stripPoints = function (components) {
           return (components || []).map(function (c) { return { id: c.id, label: c.label, max: c.max, measured: c.measured }; });
         };
+        // Risk flags, counterparty summary and disclaimer are compared
+        // too — but only when the report carries them. Reports
+        // published before Phase 3 carry none, and are not penalised
+        // for it.
+        var extraMismatch = function (reported, recomputed) {
+          if (reported.riskFlags !== undefined && JSON.stringify(reported.riskFlags) !== JSON.stringify(recomputed.riskFlags)) {
+            return 'Score risk flags differ on rerun.';
+          }
+          if (reported.counterpartySummary !== undefined && JSON.stringify(reported.counterpartySummary) !== JSON.stringify(recomputed.counterpartySummary)) {
+            return 'Score counterparty summary differs on rerun.';
+          }
+          if (reported.disclaimer !== undefined && reported.disclaimer !== recomputed.disclaimer) {
+            return 'Score disclaimer differs on rerun.';
+          }
+          return null;
+        };
+        var flagSuffix = function (recomputed) {
+          return recomputed.riskFlags.length > 0
+            ? ' Risk flags: ' + recomputed.riskFlags.length + ' (' + recomputed.riskFlags.map(function (f) { return f.type + ', ' + f.severity; }).join('; ') + ').'
+            : '';
+        };
         var sameScore = false;
         var scoreDetail = '';
         if (report.score.value !== undefined && report.score.value !== null) {
@@ -908,18 +1974,35 @@ touched the chain. A report with no AI summary means "not analysed", not
             againScore.value === report.score.value &&
             againScore.band === report.score.band &&
             JSON.stringify(againScore.components) === JSON.stringify(report.score.components);
-          scoreDetail = sameScore
-            ? 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').'
-            : 'Score differs on rerun (report: ' + report.score.value + ', rerun: ' + againScore.value + ').';
+          if (sameScore) {
+            var mismatchExact = extraMismatch(report.score, againScore);
+            if (mismatchExact !== null) {
+              sameScore = false;
+              scoreDetail = mismatchExact;
+            } else {
+              scoreDetail = 'Score recomputed exactly: ' + againScore.value + ' (' + againScore.band + ').' + flagSuffix(againScore);
+            }
+          } else {
+            scoreDetail = 'Score differs on rerun (report: ' + report.score.value + ', rerun: ' + againScore.value + ').';
+          }
         } else {
           sameScore = againScore.version === report.score.version &&
             againScore.band === report.score.band &&
             JSON.stringify(stripPoints(againScore.components)) === JSON.stringify(stripPoints(report.score.components));
-          scoreDetail = sameScore
-            ? 'Score recomputed from the disclosure snapshot: band ' + againScore.band + ' (matches the public band).'
-            : 'Score band differs on rerun (report band: ' + report.score.band + ', rerun band: ' + againScore.band + ').';
+          if (sameScore) {
+            var mismatchPred = extraMismatch(report.score, againScore);
+            if (mismatchPred !== null) {
+              sameScore = false;
+              scoreDetail = mismatchPred;
+            } else {
+              scoreDetail = 'Score recomputed from the disclosure snapshot: band ' + againScore.band + ' (matches the public band).' + flagSuffix(againScore);
+            }
+          } else {
+            scoreDetail = 'Score band differs on rerun (report band: ' + report.score.band + ', rerun band: ' + againScore.band + ').';
+          }
         }
         if (sameScore) {
+          recomputedScore = againScore;
           check('score', true, scoreDetail);
         } else {
           check('score', false, scoreDetail);
@@ -929,7 +2012,7 @@ touched the chain. A report with no AI summary means "not analysed", not
       check('score', false, 'Score rerun failed: ' + err.message);
     }
 
-    // g. Every linked wallet proves ownership (transfer or signature).
+    // h. Every linked wallet proves ownership (transfer or signature).
     if (linked.length === 0) {
       check('link_proofs', true, 'No linked wallets to prove.');
     } else {
@@ -998,7 +2081,126 @@ touched the chain. A report with no AI summary means "not analysed", not
       }
     })();
 
-    return { valid: checks.every(function (c) { return c.passed; }), checks: checks };
+    // --- Five separate statuses, derived from the ten checks ---
+    // Mirror of the same section in src/verify-report.js. The three
+    // copies must stay in sync; the parity tests compare the full
+    // result objects.
+    var dataHashCheck = null;
+    for (var dhi = 0; dhi < checks.length; dhi++) {
+      if (checks[dhi].check === 'data_hash') { dataHashCheck = checks[dhi]; break; }
+    }
+    var source_status = checkPassed(checks, 'data_hash')
+      ? {
+          status: 'VERIFIED',
+          detail: 'Blockchain data retrieved and processed: the disclosed snapshot reproduces the data hash committed onchain at publication.'
+        }
+      : { status: 'FAILED', detail: (dataHashCheck && dataHashCheck.detail) || 'The data hash check failed.' };
+
+    var computationFailed = ['claims', 'score', 'sampling', 'link_proofs'].filter(function (name) { return !checkPassed(checks, name); });
+    var computation_status = computationFailed.length === 0
+      ? {
+          status: 'VERIFIED',
+          detail: 'Calculations independently reproduced: the claims, the deterministic score, the sampling record and the wallet link proofs were rerun from the disclosure snapshot and match the report.'
+        }
+      : { status: 'FAILED', detail: 'The rerun did not reproduce the report: ' + computationFailed.join(', ') + ' failed.' };
+
+    var report_integrity_status;
+    var integrityFailed = ['prover_binding', 'report_hash', 'evidence_hash', 'policy_hash'].filter(function (name) { return !checkPassed(checks, name); });
+    var expiredByTime = false;
+    try {
+      expiredByTime = !(now < BigInt(report.expiresAt));
+    } catch (e) {
+      expiredByTime = false;
+    }
+    if (integrityFailed.length > 0) {
+      report_integrity_status = {
+        status: 'FAILED',
+        detail: 'The report does not match its published record: ' + integrityFailed.join(', ') + ' failed.'
+      };
+    } else if (expiredByTime) {
+      report_integrity_status = { status: 'EXPIRED', detail: 'The report is past its expiry date.' };
+    } else if (onchainRecord.valid === false) {
+      report_integrity_status = {
+        status: 'REVOKED',
+        detail: 'The registry reports the claim invalid (revoked, expired, or missing).'
+      };
+    } else if (!checkPassed(checks, 'validity')) {
+      report_integrity_status = {
+        status: 'UNVERIFIED',
+        detail: 'The registry did not confirm the claim valid, so revocation could not be checked.'
+      };
+    } else {
+      report_integrity_status = {
+        status: 'VERIFIED',
+        detail: 'The report is exactly what was published: the report, evidence and policy hashes match the onchain record, the disclosure belongs to this report, and the registry still reports the claim valid.'
+      };
+    }
+
+    var privacy_status;
+    var hasExactValues =
+      (Array.isArray(report.claims) && report.claims.some(function (c) { return c && c.value !== undefined; })) ||
+      (report.score !== null && report.score !== undefined && report.score.value !== undefined && report.score.value !== null);
+    var salted = typeof disclosurePackage.salt === 'string' && /^[0-9a-f]{32}$/.test(disclosurePackage.salt);
+    var addressInReport =
+      (typeof report.prover === 'string' && report.prover.length > 0 && !SHA256_HEX.test(report.prover)) ||
+      typeof report.address === 'string';
+    if (addressInReport) {
+      privacy_status = { status: 'PUBLIC', detail: 'The public report itself names the wallet address.' };
+    } else if (hasExactValues || !salted) {
+      var privacyReasons = [];
+      if (hasExactValues) privacyReasons.push('the public report discloses exact values');
+      if (!salted) {
+        privacyReasons.push('the wallet commitment has no fresh salt, so two reports from the same wallet share one commitment and can be matched');
+      }
+      privacy_status = { status: 'PARTIALLY_DISCLOSED', detail: 'Partly disclosed: ' + privacyReasons.join(' and ') + '.' };
+    } else {
+      privacy_status = {
+        status: 'PRIVATE',
+        detail: 'Private from the public: the published report carries thresholds and a score band only, no exact values, and the wallet commitment uses a fresh salt, so two reports cannot be matched by their commitments. The address itself never appears in the public report.'
+      };
+    }
+
+    var attestation_status = deriveAttestationStatus(attestation, report, nowNs);
+
+    var sampling = null;
+    try {
+      sampling = describeSampling(bundle);
+    } catch (e2) {
+      sampling = null;
+    }
+    var score = null;
+    try {
+      if (recomputedScore) {
+        var stripPoints = function (components) {
+          return (components || []).map(function (c) {
+            return { id: c.id, label: c.label, max: c.max, measured: c.measured };
+          });
+        };
+        score = {
+          version: recomputedScore.version,
+          band: recomputedScore.band,
+          components: stripPoints(recomputedScore.components),
+          riskFlags: recomputedScore.riskFlags,
+          counterpartyLabels: recomputedScore.counterpartyLabels,
+          counterpartySummary: recomputedScore.counterpartySummary,
+          disclaimer: recomputedScore.disclaimer,
+        };
+      }
+    } catch (e3) {
+      score = null;
+    }
+
+    return {
+      valid: checks.every(function (c) { return c.passed; }),
+      checks: checks,
+      source_status: source_status,
+      computation_status: computation_status,
+      attestation_status: attestation_status,
+      report_integrity_status: report_integrity_status,
+      privacy_status: privacy_status,
+      sampling: sampling,
+      score: score
+    };
   }
 
   // Exposed for the parity test (test/verify-report.test.mjs runs this
@@ -1012,6 +2214,9 @@ touched the chain. A report with no AI summary means "not analysed", not
     computeDataHash: computeDataHash,
     evaluateClaims: evaluateClaims,
     verifyReport: verifyReport,
+    summariseVerification: summariseVerification,
+    buildStatusPanelsHtml: buildStatusPanelsHtml,
+    formatNearYocto: formatNearYocto,
     isEncryptedDisclosurePackage: isEncryptedDisclosurePackage,
     openDisclosurePackage: openDisclosurePackage,
   };
@@ -1185,9 +2390,17 @@ touched the chain. A report with no AI summary means "not analysed", not
   }
 
   function renderCertificate(result, report, disclosurePackage, policy) {
+    var summary = summariseVerification(result);
     var banner = el('banner');
-    banner.textContent = result.valid ? 'VALID, this report verifies.' : 'INVALID, this report does not verify.';
-    banner.className = 'banner ' + (result.valid ? 'valid' : 'invalid');
+    banner.textContent = summary.headline;
+    banner.className = 'banner ' + (summary.tone === 'ok' ? 'valid' : summary.tone === 'warn' ? 'warn' : 'invalid');
+    var panels = buildStatusPanelsHtml(result, report);
+    el('statuses').innerHTML = panels.summary;
+    el('privacyPanel').innerHTML = panels.privacy;
+    el('attestationPanel').innerHTML = panels.attestation;
+    el('integrityPanel').innerHTML = panels.integrity;
+    el('samplingPanel').innerHTML = panels.sampling;
+    el('scorePanel').innerHTML = panels.score;
     el('checks').innerHTML = result.checks.map(function (c) {
       return '<div class="check ' + (c.passed ? 'pass' : 'fail') + '"><span class="mark">' +
         (c.passed ? '✓' : '✗') + ' ' + esc(c.check) + '</span><div class="detail">' + esc(c.detail) + '</div></div>';
