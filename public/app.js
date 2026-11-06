@@ -1,9 +1,17 @@
 // VeilProof prover app — runs entirely in the prover's browser.
 //
-// Flow: connect wallet (testnet) -> optional ownership challenge ->
-// fetch onchain snapshot -> choose policy -> evaluate claims -> choose
-// what to disclose -> optional NEAR AI analysis -> build report ->
-// publish the three hashes onchain.
+// Flow: paste a wallet address to preview (no wallet needed — the chain
+// is public) -> connect the wallet that owns that address -> optional
+// ownership challenge -> fetch onchain snapshot -> choose policy ->
+// evaluate claims -> choose what to disclose -> optional NEAR AI
+// analysis -> build report -> publish the three hashes onchain.
+//
+// The preview is read-only: anyone can read any wallet's onchain data,
+// so a preview proves nothing about who you are. Ownership is proved
+// only by the wallet: the challenge signature and the publish
+// transaction must come from the wallet that owns the previewed
+// address. previewMatchesConnected() enforces that binding at every
+// step that needs it, and publish() refuses to sign otherwise.
 //
 // Privacy, by construction:
 // - The snapshot, the address and the tx hashes never leave this
@@ -80,6 +88,7 @@ function download(filename, obj) {
 
 const state = {
   accountId: null,
+  previewAddress: null,
   challenge: null,
   snapshot: null,
   policy: null,
@@ -97,6 +106,7 @@ function saveState() {
       'veilproof-prover-state',
       JSON.stringify({
         accountId: state.accountId,
+        previewAddress: state.previewAddress,
         challenge: state.challenge,
         snapshot: state.snapshot,
         policy: state.policy,
@@ -123,6 +133,43 @@ function loadState() {
   } catch (_) {
     // Corrupt or unavailable state: start fresh.
   }
+}
+
+// The address the prover is previewing. Reading is public, so this
+// needs no wallet — but it proves nothing about ownership. The value
+// is normalised to lowercase and validated as a NEAR account id:
+// 2-64 chars of a-z, 0-9, '.', '_' or '-', ending in .near or
+// .testnet, or a 64-hex implicit account.
+function readPreviewAddress() {
+  const raw = $('previewAddress').value.trim().toLowerCase();
+  if (!raw) throw new Error('Enter a wallet address to preview (e.g. veilproof-demo.testnet).');
+  const named = /^[a-z0-9._-]{2,64}$/.test(raw) && (raw.endsWith('.near') || raw.endsWith('.testnet'));
+  const implicit = /^[0-9a-f]{64}$/.test(raw);
+  if (!named && !implicit) {
+    throw new Error(
+      'That does not look like a NEAR address — use a named account ending in .near or .testnet, or a 64-character hex account.',
+    );
+  }
+  state.previewAddress = raw;
+  saveState();
+  return raw;
+}
+
+// True only when the connected wallet is the wallet that owns the
+// previewed address. This is the binding the whole proof rests on:
+// the challenge signature and the publish transaction are only
+// meaningful when the signer is the owner of the address in the
+// report. Every step that signs or publishes checks this first.
+function previewMatchesConnected() {
+  return Boolean(state.previewAddress && state.accountId && state.previewAddress === state.accountId);
+}
+
+function refreshPublishBtn() {
+  $('publishBtn').disabled = !(
+    state.report &&
+    $('publishConfirm').checked &&
+    previewMatchesConnected()
+  );
 }
 
 // Any upstream change invalidates the built report (and its hashes):
@@ -168,12 +215,24 @@ function updateWalletUI() {
     ? 'Connected on testnet. Ready to prove claims.'
     : 'Not connected. Meteor and MyNearWallet are supported.';
   const connected = Boolean(state.accountId);
-  $('challengeBtn').disabled = !connected;
-  $('loadDemoBtn').disabled = !connected;
-  $('fetchSnapshotBtn').disabled = !connected;
-  $('evaluateBtn').disabled = !(connected && state.snapshot);
-  $('aiBtn').disabled = !(connected && state.evaluation);
-  $('buildReportBtn').disabled = !(connected && state.evaluation);
+  const matches = previewMatchesConnected();
+  // Preview needs no wallet: the chain is public, so the demo load,
+  // the snapshot fetch and the claims all work before any wallet is
+  // connected. Only the steps that prove ownership need the wallet,
+  // and they need the wallet that OWNS the previewed address.
+  $('loadDemoBtn').disabled = false;
+  $('fetchSnapshotBtn').disabled = false;
+  $('challengeBtn').disabled = !(connected && matches);
+  if (connected && !matches && !state.challenge) {
+    $('challengeOut').innerHTML =
+      '<p class="warn">Connected wallet <span class="mono">' + esc(state.accountId) + '</span> does not own the previewed address' +
+      (state.previewAddress ? ' <span class="mono">' + esc(state.previewAddress) + '</span>' : '') +
+      '. Switch wallets to sign the challenge for the previewed address — or preview a different address.</p>';
+  }
+  $('evaluateBtn').disabled = !state.snapshot;
+  $('aiBtn').disabled = !state.evaluation;
+  $('buildReportBtn').disabled = !state.evaluation;
+  refreshPublishBtn();
 }
 
 async function connectWallet() {
@@ -185,16 +244,12 @@ async function connectWallet() {
       } catch (_) {}
       state.accountId = null;
       state.challenge = null;
-      state.snapshot = null;
-      state.policy = null;
-      state.evaluation = null;
-      state.aiSummary = null;
-      state.attestationRef = null;
-      invalidateReport('the wallet was disconnected.');
+      // The preview, snapshot, claims and report stay: they belong to
+      // the previewed address, not to the wallet session, and the
+      // report is still bound to that address. Only the ownership
+      // proof (the challenge) is gone, and publish stays blocked until
+      // the owning wallet is connected again (previewMatchesConnected).
       $('challengeOut').innerHTML = '';
-      $('snapshotOut').innerHTML = '';
-      $('claimsOut').innerHTML = '';
-      $('discloseList').innerHTML = '';
       updateWalletUI();
       saveState();
       return;
@@ -277,7 +332,7 @@ async function signChallenge() {
       '<p class="mono">Signature: ' + esc(signature || '(not returned)') + '</p>' +
       '<p>' + esc(keyCheck) + '</p>' +
       '<p class="muted">Full cryptographic verification of the NEP-413 payload is not done here — ' +
-      'the publish transaction in step 6 is the binding proof onchain (the registry records the signer as the claim owner).</p>';
+      'the publish transaction in step 5 is the binding proof onchain (the registry records the signer as the claim owner).</p>';
     saveState();
   } catch (err) {
     out.innerHTML =
@@ -294,7 +349,9 @@ function parseTxLines() {
   const entries = [];
   for (const line of lines) {
     const parts = line.split(',').map((p) => p.trim());
-    if (parts.length === 1) entries.push({ hash: parts[0], senderId: state.accountId });
+    // A bare hash is assumed to belong to the previewed address — the
+    // wallet is not needed to read it, only to prove it is yours.
+    if (parts.length === 1) entries.push({ hash: parts[0], senderId: state.previewAddress });
     else if (parts.length === 2) entries.push({ hash: parts[0], senderId: parts[1] });
     else throw new Error(`bad tx line (expected "hash" or "hash,senderId"): ${line}`);
   }
@@ -306,16 +363,16 @@ async function loadDemoHistory() {
     const res = await fetch('./demo-history.json');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const history = await res.json();
-    if (history.accountId !== state.accountId) {
-      $('snapshotOut').innerHTML =
-        '<p class="warn">The demo history belongs to ' + esc(history.accountId) +
-        ', not to the connected wallet ' + esc(state.accountId) +
-        '. Connect that wallet to use it, or paste your own hashes.</p>';
-      return;
-    }
+    // No wallet needed: the demo history is public testnet data. Fill
+    // the preview address too, so the preview is one click.
+    $('previewAddress').value = history.accountId;
+    state.previewAddress = history.accountId;
     $('txHashes').value = history.transfers.map((t) => `${t.hash},${t.senderId}`).join('\n');
     $('snapshotOut').innerHTML =
-      '<p class="ok">Demo history loaded: ' + history.transfers.length + ' transfers. Press "Fetch snapshot" to verify them onchain.</p>';
+      '<p class="ok">Demo history loaded: ' + history.transfers.length + ' transfers for <span class="mono">' +
+      esc(history.accountId) + '</span>. Press "Fetch snapshot" to verify them onchain — no wallet needed.</p>';
+    updateWalletUI();
+    saveState();
   } catch (err) {
     $('snapshotOut').innerHTML = '<p class="error">Could not load the demo history: ' + esc(err.message) + '</p>';
   }
@@ -324,13 +381,14 @@ async function loadDemoHistory() {
 async function fetchSnapshot() {
   const out = $('snapshotOut');
   try {
+    const address = readPreviewAddress();
     const entries = parseTxLines();
-    out.innerHTML = '<p class="muted">Fetching account state and verifying ' + entries.length + ' transaction(s)…</p>';
-    const snapshot = await fetchAccountSnapshot(state.accountId, entries);
+    out.innerHTML = '<p class="muted">Fetching account state for <span class="mono">' + esc(address) + '</span> and verifying ' + entries.length + ' transaction(s)…</p>';
+    const snapshot = await fetchAccountSnapshot(address, entries);
     state.snapshot = snapshot;
     invalidateReport('a new snapshot was fetched.');
     out.innerHTML =
-      '<p class="ok">Snapshot fetched at block ' + snapshot.blockHeight + '.</p>' +
+      '<p class="ok">Snapshot fetched for <span class="mono">' + esc(address) + '</span> at block ' + snapshot.blockHeight + '.</p>' +
       '<p>Balance: <span class="mono">' + esc(yoctoToNear(snapshot.account.amount)) + ' NEAR</span> ' +
       '(staked: <span class="mono">' + esc(yoctoToNear(snapshot.account.locked)) + ' NEAR</span>)</p>' +
       '<p>Verified transactions: ' + snapshot.txs.length + ' of ' + entries.length + ' supplied ' +
@@ -541,12 +599,13 @@ async function buildReportAndHashes() {
   const out = $('reportOut');
   try {
     if (!state.evaluation || !state.snapshot) throw new Error('Evaluate the claims first.');
+    if (!state.previewAddress) throw new Error('Enter a wallet address to preview first.');
     const disclosed = Array.from(document.querySelectorAll('#discloseList input[type="checkbox"]:checked')).map(
       (box) => box.dataset.claim,
     );
     const days = Number($('expirySelect').value);
     const expiresAt = computeExpiresAt(days);
-    const proverAddressHash = await sha256Hex(state.accountId);
+    const proverAddressHash = await sha256Hex(state.previewAddress);
     const report = buildReport({
       proverAddressHash,
       claims: state.evaluation.claims,
@@ -560,10 +619,10 @@ async function buildReportAndHashes() {
     // any transaction hash. If it ever did, refuse to show or publish it.
     assertPublicReportClean(
       report,
-      state.accountId,
+      state.previewAddress,
       state.snapshot.txs.map((t) => t.hash),
     );
-    const disclosurePackage = await buildDisclosurePackage(report, state.accountId, state.snapshot);
+    const disclosurePackage = await buildDisclosurePackage(report, state.previewAddress, state.snapshot);
     const hashes = {
       report_hash: await reportHash(report),
       evidence_hash: await evidenceHash(report.evidenceRefs),
@@ -589,6 +648,7 @@ async function buildReportAndHashes() {
       'The contract charges storage at cost (roughly 0.003–0.005 NEAR for a claim record) and refunds the excess deposit; ' +
       'you pay only for gas actually used. The wallet shows the exact amounts before you sign.';
     $('publishBtn').disabled = !$('publishConfirm').checked;
+    refreshPublishBtn();
     saveState();
   } catch (err) {
     out.innerHTML = '<p class="error">Report build failed: ' + esc(err.message) + '</p>';
@@ -611,6 +671,17 @@ async function publish() {
   try {
     if (!state.report || !state.hashes) throw new Error('Build a report first.');
     if (!$('publishConfirm').checked) throw new Error('Tick the confirmation box first.');
+    // The binding: the publish transaction is signed by the connected
+    // wallet, and the registry records the signer as the claim owner.
+    // If the signer is not the owner of the previewed address, the
+    // report would claim one wallet's history under another wallet's
+    // name — so refuse to sign at all, rather than publish a lie.
+    if (!previewMatchesConnected()) {
+      throw new Error(
+        'Connect the wallet that owns ' + (state.previewAddress || 'the previewed address') +
+          ' before publishing — the connected wallet ' + (state.accountId || '(none)') + ' does not own it.',
+      );
+    }
     const nw = fastnear();
     out.innerHTML = '<p class="muted">Waiting for the wallet to sign the publish transaction…</p>';
     const result = await nw.sendTransaction({
@@ -672,6 +743,7 @@ function handleRedirectResult() {
 }
 
 function restoreUIFromState() {
+  if (state.previewAddress) $('previewAddress').value = state.previewAddress;
   if (state.accountId) updateWalletUI();
   if (state.challenge) {
     $('challengeOut').innerHTML =
@@ -700,6 +772,7 @@ function restoreUIFromState() {
       'Publishing attaches <strong>0.01 NEAR</strong> and a 100 TGas gas limit. ' +
       'The contract charges storage at cost and refunds the excess deposit. The wallet shows the exact amounts before you sign.';
     $('publishBtn').disabled = !$('publishConfirm').checked;
+    refreshPublishBtn();
   }
   updateWalletUI();
 }
@@ -712,6 +785,26 @@ window.addEventListener('load', async () => {
   $('challengeBtn').addEventListener('click', signChallenge);
   $('loadDemoBtn').addEventListener('click', loadDemoHistory);
   $('fetchSnapshotBtn').addEventListener('click', fetchSnapshot);
+  $('previewAddress').addEventListener('change', () => {
+    const next = $('previewAddress').value.trim().toLowerCase();
+    // A new address means a new snapshot: everything downstream was
+    // about the old address and must go, so a stale report can never
+    // be published under a new address.
+    if (state.snapshot && state.snapshot.account.accountId !== next) {
+      state.snapshot = null;
+      state.policy = null;
+      state.evaluation = null;
+      state.aiSummary = null;
+      state.attestationRef = null;
+      invalidateReport('the previewed address changed.');
+      $('snapshotOut').innerHTML = '';
+      $('claimsOut').innerHTML = '';
+      $('discloseList').innerHTML = '';
+      updateWalletUI();
+    }
+    state.previewAddress = next || null;
+    saveState();
+  });
   $('evaluateBtn').addEventListener('click', evaluate);
   $('aiBtn').addEventListener('click', runAiAnalysis);
   $('buildReportBtn').addEventListener('click', buildReportAndHashes);
@@ -724,7 +817,7 @@ window.addEventListener('load', async () => {
     }
   });
   $('publishConfirm').addEventListener('change', () => {
-    $('publishBtn').disabled = !(state.report && $('publishConfirm').checked);
+    refreshPublishBtn();
   });
   $('publishBtn').addEventListener('click', publish);
   // Restore a previous wallet session (same pattern as Genesis).

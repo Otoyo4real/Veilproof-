@@ -15,6 +15,7 @@ const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf
 const appJs = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
 
 const REQUIRED_IDS = [
+  'previewAddress',
   'connectBtn',
   'walletStatus',
   'accountLine',
@@ -89,6 +90,25 @@ test('index.html hardcodes no wallet address', () => {
   assert.ok(!withoutRegistry.includes('veilproof-demo.testnet'), 'demo wallet address must not be hardcoded in the page');
   assert.ok(!withoutRegistry.includes('veilproof.testnet'), 'deployer wallet address must not be hardcoded in the page');
   assert.ok(!html.includes('testnet-accounts'), 'key file must never be referenced from the page');
+});
+
+test('preview flow: paste an address to preview, wallet only to sign and publish', () => {
+  // The preview is read-only and needs no wallet; ownership is proved
+  // only by the connected wallet that owns the previewed address.
+  assert.ok(html.includes('id="previewAddress"'), 'index.html must have the preview address input');
+  assert.ok(appJs.includes('readPreviewAddress'), 'app.js must read and validate the preview address');
+  assert.ok(appJs.includes('previewMatchesConnected'), 'app.js must bind signing/publishing to the owning wallet');
+  assert.ok(
+    appJs.includes('if (!previewMatchesConnected())'),
+    'publish() must refuse to sign when the connected wallet does not own the previewed address',
+  );
+  // The demo load and the snapshot fetch must not be gated on a wallet.
+  assert.ok(!appJs.includes("$('loadDemoBtn').disabled = !connected"), 'demo load must not need a wallet');
+  assert.ok(!appJs.includes("$('fetchSnapshotBtn').disabled = !connected"), 'snapshot fetch must not need a wallet');
+  // The prover commitment, tripwire and disclosure must use the
+  // previewed address, not the connected wallet.
+  assert.ok(appJs.includes('sha256Hex(state.previewAddress)'), 'prover commitment must hash the previewed address');
+  assert.ok(appJs.includes('buildDisclosurePackage(report, state.previewAddress'), 'disclosure must use the previewed address');
 });
 
 test('app.js keeps private data out of the AI request and the public report', () => {

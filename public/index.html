@@ -18,7 +18,7 @@
 </header>
 
 <main class="wrap">
-<section class="hero">
+<section class="hero hero-dark">
   <p class="eyebrow">NEAR Hackathon 2026 · Privacy &amp; Private AI</p>
   <h1>Prove you&rsquo;re good for it — without handing over your wallet</h1>
   <p class="lede">A lender, a deal partner, a grant committee — they all want proof before
@@ -31,7 +31,7 @@
   goes only to the verifier you chose, in a private package.</p>
   <div class="cta-row">
     <a class="btn btn-primary" href="#step-1">Start proving</a>
-    <a class="btn btn-secondary" href="verify.html">Verifier portal</a>
+    <a class="btn btn-ghost" href="verify.html">Verifier portal</a>
   </div>
 </section>
 
@@ -50,6 +50,30 @@
   </div>
 </section>
 
+<section class="card proof-card" aria-label="Live proof">
+  <div class="proof-head">
+    <span class="badge-valid">VALID</span>
+    <h2>Live proof — a real claim, verified onchain</h2>
+  </div>
+  <p>This claim was published from the demo wallet and verified against its
+  onchain record. All seven checks pass, and the AI summary is attested.</p>
+  <table>
+    <tr><th>Check</th><th>Result</th></tr>
+    <tr><td>Prover binding</td><td>Pass</td></tr>
+    <tr><td>Report hash</td><td>Pass</td></tr>
+    <tr><td>Evidence hash</td><td>Pass</td></tr>
+    <tr><td>Policy hash</td><td>Pass</td></tr>
+    <tr><td>Data hash</td><td>Pass</td></tr>
+    <tr><td>Claims re-run</td><td>Pass</td></tr>
+    <tr><td>Validity</td><td>Pass</td></tr>
+  </table>
+  <p>Report ID: <span class="mono">86f237c0cf2e3fe6</span><br>
+  AI verdict: <strong>consistent</strong> (NEAR AI Cloud, attested)<br>
+  Expires: 6 December 2026</p>
+  <p><a class="btn btn-secondary" href="verify.html?report=86f237c0cf2e3fe6">Check it yourself</a></p>
+  <p class="muted">7 checks · 30-day claim windows · 77/77 tests passing</p>
+</section>
+
 <div class="note">
 <strong>Your wallet stays yours.</strong> Everything on this page runs in
 your browser. The chain is read, never written to, until you choose to
@@ -59,41 +83,45 @@ only — never your address, never transaction hashes. A report without an AI
 summary says "not analysed", never "verified by AI".
 </div>
 
+<div class="flow">
 <section class="card" id="step-1">
-  <div class="step-head"><span class="step-num">1</span><h2>Connect your wallet (NEAR testnet)</h2></div>
-  <p><button id="connectBtn" type="button">Connect wallet</button></p>
-  <p id="walletStatus" class="muted">Not connected. Meteor and MyNearWallet are supported.</p>
-  <p id="accountLine" class="mono"></p>
+  <div class="step-head"><span class="step-num">1</span><h2>Preview a wallet — no wallet needed</h2></div>
+  <p>Paste any NEAR address and see its claims. The chain is public, so
+  everything in steps 1–4 runs in your browser with no wallet connected.
+  You only connect a wallet to sign the challenge and publish — and it
+  must be the wallet that owns the address you previewed. A preview alone
+  proves nothing about who you are; the signature is the proof.</p>
+  <label>Wallet address (.near or .testnet)
+  <input id="previewAddress" type="text" placeholder="e.g. alice.testnet" autocomplete="off" spellcheck="false">
+  </label>
+  <label>Transaction hashes (base58, one per line)
+  <textarea id="txHashes" placeholder="EQeaPK7R7nzT14a6e5kc685Yug45LDMxP4K7YhTxYn9g,sender.testnet"></textarea>
+  </label>
+  <p class="muted">A bare hash is assumed to be yours; use
+  <span class="mono">hash,senderId</span> for incoming transfers sent by
+  someone else. Hashes that cannot be verified onchain are skipped.</p>
+  <p>
+    <button id="loadDemoBtn" type="button">Load demo history</button>
+    <button id="fetchSnapshotBtn" type="button">Fetch snapshot</button>
+  </p>
+  <div id="snapshotOut"></div>
 </section>
 
 <section class="card" id="step-2">
-  <div class="step-head"><span class="step-num">2</span><h2>Prove you own the wallet (optional, recommended)</h2></div>
-  <p>Sign a short ownership challenge with the connected wallet. The
-  signature is shown here as evidence; the publish transaction in step 6
-  is the binding proof onchain (the registry records the signer as the
-  claim owner).</p>
+  <div class="step-head"><span class="step-num">2</span><h2>Connect your wallet to sign</h2></div>
+  <p>Connect the wallet that owns the address you previewed, then sign a
+  short ownership challenge. The signature is what a lender trusts — only
+  the owner of the key could have made it. Publishing in step 5 is a
+  transaction from the same wallet.</p>
+  <p><button id="connectBtn" type="button">Connect wallet</button></p>
+  <p id="walletStatus" class="muted">Not connected. Meteor and MyNearWallet are supported.</p>
+  <p id="accountLine" class="mono"></p>
   <p><button id="challengeBtn" type="button" disabled>Sign ownership challenge</button></p>
   <div id="challengeOut"></div>
 </section>
 
 <section class="card" id="step-3">
-  <div class="step-head"><span class="step-num">3</span><h2>Fetch your onchain snapshot</h2></div>
-  <p>Paste the transaction hashes you want the claims evaluated over, one
-  per line. A bare hash is assumed to be yours; use
-  <span class="mono">hash,senderId</span> for incoming transfers sent by
-  someone else. Hashes that cannot be verified onchain are skipped.</p>
-  <label>Transaction hashes (base58, one per line)
-  <textarea id="txHashes" placeholder="EQeaPK7R7nzT14a6e5kc685Yug45LDMxP4K7YhTxYn9g,sender.testnet"></textarea>
-  </label>
-  <p>
-    <button id="loadDemoBtn" type="button" disabled>Load demo history</button>
-    <button id="fetchSnapshotBtn" type="button" disabled>Fetch snapshot</button>
-  </p>
-  <div id="snapshotOut"></div>
-</section>
-
-<section class="card" id="step-4">
-  <div class="step-head"><span class="step-num">4</span><h2>Choose the policy, evaluate the claims</h2></div>
+  <div class="step-head"><span class="step-num">3</span><h2>Choose the policy, evaluate the claims</h2></div>
   <p>Leave a field blank to skip that claim. Thresholds are in NEAR.
   Windows are in days. A minimum tx count or volume needs its window.</p>
   <div class="row">
@@ -115,8 +143,8 @@ summary says "not analysed", never "verified by AI".
   <div id="claimsOut"></div>
 </section>
 
-<section class="card" id="step-5">
-  <div class="step-head"><span class="step-num">5</span><h2>Disclose, analyse, build the report</h2></div>
+<section class="card" id="step-4">
+  <div class="step-head"><span class="step-num">4</span><h2>Disclose, analyse, build the report</h2></div>
   <p>Choose which evaluated claims go into the public report. Claims you
   leave out are simply absent from the report — the verifier never sees
   them unless you disclose them another way.</p>
@@ -140,8 +168,8 @@ summary says "not analysed", never "verified by AI".
   </p>
 </section>
 
-<section class="card" id="step-6">
-  <div class="step-head"><span class="step-num">6</span><h2>Publish the hashes onchain</h2></div>
+<section class="card" id="step-5">
+  <div class="step-head"><span class="step-num">5</span><h2>Publish the hashes onchain</h2></div>
   <div class="warn">
   <strong>Publishing is a real testnet transaction, signed by your wallet.</strong>
   Only the three hashes and the report id go onchain — never your address,
@@ -155,12 +183,14 @@ summary says "not analysed", never "verified by AI".
     <div id="publishOut"></div>
   </div>
 </section>
+</div>
 </main>
 
 <footer class="site-footer">
   <div class="wrap">
     <p>VeilProof — NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
     <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
+    <p><a href="index.html">Prover</a> · <a href="verify.html">Verifier portal</a> · <a href="https://github.com/Otoyo4real/Veilproof-" target="_blank" rel="noopener">GitHub repository</a></p>
   </div>
 </footer>
 

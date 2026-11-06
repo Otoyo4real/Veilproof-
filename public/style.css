@@ -107,6 +107,16 @@ p:last-child { margin-bottom: 0; }
 
 /* ---------- hero ---------- */
 .hero { padding: 2.75rem 0 2rem; }
+.hero-dark {
+  background: var(--ink);
+  color: #fff;
+  border-radius: 16px;
+  padding: 2.5rem 2rem;
+  margin: 2rem 0;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+}
+.hero-dark .eyebrow { color: #5eead4; }
+.hero-dark .lede { color: #cbd5e1; }
 .cta-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1.25rem; }
 
 /* ---------- buttons & links ---------- */
@@ -130,6 +140,8 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .btn-primary:hover { background: var(--accent-dark); }
 .btn-secondary { background: var(--card); color: var(--ink); border-color: var(--line); }
 .btn-secondary:hover { border-color: var(--muted); }
+.btn-ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.45); }
+.btn-ghost:hover { border-color: #fff; }
 a { color: var(--accent); }
 a:hover { color: var(--accent-dark); }
 
@@ -149,6 +161,37 @@ a:hover { color: var(--accent-dark); }
 }
 .strip-item strong { display: block; font-size: 0.95rem; margin-bottom: 0.25rem; }
 .strip-item span { font-size: 0.88rem; color: var(--muted); line-height: 1.5; }
+
+/* ---------- live proof ---------- */
+.proof-head { display: flex; align-items: center; gap: 0.85rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.proof-head h2 { font-size: 1.2rem; }
+.badge-valid {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #166534;
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-line);
+  border-radius: 999px;
+}
+.proof-card table { margin: 0.5rem 0 1rem; }
+.proof-card td:last-child { font-weight: 700; color: var(--ok); }
+
+/* ---------- flow timeline ---------- */
+.flow { position: relative; }
+.flow::before {
+  content: '';
+  position: absolute;
+  left: 38px;
+  top: 32px;
+  bottom: 32px;
+  width: 2px;
+  background: #cbd5e1;
+}
+.flow .card { position: relative; }
+.flow .step-num { box-shadow: 0 0 0 4px #fff; position: relative; z-index: 1; }
 
 /* ---------- cards & steps ---------- */
 .card {
@@ -272,6 +315,8 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; colo
 @media (max-width: 640px) {
   h1 { font-size: 1.6rem; }
   .hero { padding: 2rem 0 1.5rem; }
+  .hero-dark { padding: 1.75rem 1.25rem; margin: 1.25rem 0; border-radius: 12px; }
+  .flow::before { left: 34px; }
   .strip { grid-template-columns: 1fr; gap: 0.75rem; }
   .card { padding: 1.25rem; }
   .site-nav { gap: 0.85rem; }
