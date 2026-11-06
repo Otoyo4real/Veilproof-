@@ -16,6 +16,13 @@ const appJs = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
 
 const REQUIRED_IDS = [
   'previewAddress',
+  'demoRunBtn',
+  'demoStatus',
+  'demoResult',
+  'demoBanner',
+  'demoChecks',
+  'demoClaims',
+  'demoFacts',
   'connectBtn',
   'walletStatus',
   'accountLine',

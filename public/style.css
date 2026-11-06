@@ -145,6 +145,65 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 a { color: var(--accent); }
 a:hover { color: var(--accent-dark); }
 
+/* ---------- hero grid + report mock ---------- */
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 2rem;
+  align-items: center;
+}
+.report-mock {
+  background: #fff;
+  color: var(--ink);
+  border-radius: 12px;
+  padding: 1.25rem 1.4rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+.mock-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.5rem; }
+.mock-title { font-weight: 700; font-size: 1.05rem; }
+.mock-id { font-size: 0.88rem; color: var(--muted); margin-bottom: 0.75rem; }
+.mock-claims { margin: 0 0 0.75rem; }
+.mock-claims td { padding: 0.35rem 0; font-size: 0.9rem; }
+.mock-claims td:last-child { text-align: right; }
+.mock-pass { color: var(--ok); font-weight: 700; }
+.mock-ai { font-size: 0.9rem; margin-bottom: 0.5rem; }
+.mock-foot { font-size: 0.82rem; color: var(--muted); margin-bottom: 0; }
+
+/* ---------- sections ---------- */
+.section { margin: 2.5rem 0; }
+.section-title { font-size: 1.5rem; letter-spacing: -0.01em; margin-bottom: 0.5rem; }
+.section-lede { color: var(--muted); margin-bottom: 1.25rem; }
+.section h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; }
+
+/* ---------- how it works ---------- */
+.how-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.how-item {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+.how-item .step-num { margin-bottom: 0.75rem; }
+.how-item strong { display: block; font-size: 1.02rem; margin-bottom: 0.35rem; }
+.how-item span:last-child { font-size: 0.92rem; color: var(--muted); line-height: 1.55; }
+
+/* ---------- proves table ---------- */
+.proves-table td:first-child { font-weight: 600; white-space: nowrap; }
+.proves-table { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+.proves-table th, .proves-table td { padding: 0.65rem 0.9rem; }
+
+/* ---------- use cases ---------- */
+.use-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+.use-item {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem;
+}
+.use-item strong { display: block; font-size: 1rem; margin-bottom: 0.3rem; }
+.use-item span { font-size: 0.92rem; color: var(--muted); line-height: 1.55; }
+
 /* ---------- strips ---------- */
 .strip {
   display: grid;
@@ -312,6 +371,11 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; colo
 .site-footer p { margin-bottom: 0.35rem; }
 
 /* ---------- small screens ---------- */
+@media (max-width: 760px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 1.5rem; }
+  .how-grid { grid-template-columns: 1fr; }
+  .use-grid { grid-template-columns: 1fr; }
+}
 @media (max-width: 640px) {
   h1 { font-size: 1.6rem; }
   .hero { padding: 2rem 0 1.5rem; }
