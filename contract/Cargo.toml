@@ -1,0 +1,35 @@
+[package]
+name = "veilproof-registry"
+version = "0.1.0"
+authors = ["Isaiah-54 <veilproof@nearhackathon>"]
+edition = "2021"
+description = "VeilProof registry — on-chain commitments for private onchain financial claims (NEAR Hackathon 2026, Privacy & Private AI)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Same versions Genesis uses (near-sdk 5.5 resolves to 5.30.0).
+near-sdk = "5.5"
+# near-sdk's own "abi" feature cannot be enabled for wasm32 (its schemars
+# dep is host-only), so enable the abi feature on near-account-id directly:
+# that gives AccountId its JsonSchema impl on wasm32 via feature unification.
+near-account-id = { version = "3", features = ["abi"] }
+borsh = "1"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Unit tests need near-sdk's unit-testing feature (feature unification makes
+# it apply to the normal build too, so `cargo test` does not hit near-sdk's
+# "use cargo near build" guard).
+[dev-dependencies]
+near-sdk = { version = "5.5", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

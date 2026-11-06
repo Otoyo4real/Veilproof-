@@ -1,0 +1,82 @@
+{
+  "generated": "2026-11-06T10:41:45.754Z",
+  "teamId": "team_6SqrJ7M3ET7iOqG7m3CnEGk3",
+  "projectName": "veilproof",
+  "files": [
+    {
+      "file": "package.json",
+      "sha1": "84cc21aa10f2ba62d10deba3f41994d72b5b21fb",
+      "size": 244
+    },
+    {
+      "file": "vercel.json",
+      "sha1": "180aa09276e011f286d1d0d9521160b516c52e9e",
+      "size": 68
+    },
+    {
+      "file": "public/index.html",
+      "sha1": "e7c6bf3064ec3183f72d2fb104ac9dfedeed2894",
+      "size": 7257
+    },
+    {
+      "file": "public/verify.html",
+      "sha1": "1d1c265df06742b0de0abfc4e47e3c5c57264b64",
+      "size": 26759
+    },
+    {
+      "file": "public/app.js",
+      "sha1": "0087c139bbbcae29e73cbad3c4d79366754cf07a",
+      "size": 30348
+    },
+    {
+      "file": "public/demo-history.json",
+      "sha1": "fddd6545a588ba0ec55b008f7a940e680c2f811b",
+      "size": 808
+    },
+    {
+      "file": "public/js/canonical.js",
+      "sha1": "ec7720ba1ec7a7e17240b0aed238163aeca91410",
+      "size": 1308
+    },
+    {
+      "file": "public/js/claims-engine.js",
+      "sha1": "61f011b43c6438d003534919fe86ee0e37ae1273",
+      "size": 6455
+    },
+    {
+      "file": "public/js/crypto.js",
+      "sha1": "a875d34f023b00ead07c8e105cbc719254850dff",
+      "size": 1351
+    },
+    {
+      "file": "public/js/report.js",
+      "sha1": "7eba91965628ed38d714ca6b956f4ea05c040a08",
+      "size": 7110
+    },
+    {
+      "file": "public/js/disclosure.js",
+      "sha1": "1b5800a7d119d1e0208e19adc88fd174b4b0ef38",
+      "size": 3680
+    },
+    {
+      "file": "public/js/onchain.js",
+      "sha1": "df219791feab4f04661333bf57e4a17893e50b42",
+      "size": 10073
+    },
+    {
+      "file": "api/analyze.js",
+      "sha1": "e764b8e62e019a268bbd28686d9a10165549ff59",
+      "size": 3404
+    },
+    {
+      "file": "src/ai-analysis.js",
+      "sha1": "208bcc81cbf45f2f9dfb4b68290cb7fe04e9182c",
+      "size": 15778
+    },
+    {
+      "file": "src/canonical.js",
+      "sha1": "ec7720ba1ec7a7e17240b0aed238163aeca91410",
+      "size": 1308
+    }
+  ]
+}

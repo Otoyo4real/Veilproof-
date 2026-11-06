@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeilProof — Verify a report</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #1a1a1a; }
+  h1 { font-size: 1.5rem; }
+  textarea, input { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 0.5rem; margin: 0.25rem 0 1rem; }
+  textarea { min-height: 7rem; }
+  button { font-size: 1rem; padding: 0.6rem 1.2rem; cursor: pointer; }
+  .banner { padding: 1rem; font-size: 1.25rem; font-weight: bold; margin: 1rem 0; }
+  .banner.valid { background: #dcfce7; color: #166534; }
+  .banner.invalid { background: #fee2e2; color: #991b1b; }
+  .check { padding: 0.4rem 0; border-bottom: 1px solid #eee; }
+  .check .mark { font-weight: bold; }
+  .check.pass .mark { color: #166534; }
+  .check.fail .mark { color: #991b1b; }
+  .check .detail { color: #555; font-size: 0.9rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }
+  .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; word-break: break-all; }
+  .note { background: #f5f5f5; padding: 0.75rem 1rem; font-size: 0.9rem; }
+  .error { color: #991b1b; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>VeilProof — Verify a report</h1>
+<p>Check a VeilProof report against its onchain record. The report proves
+claims about a wallet's onchain history — for example "balance at least 1
+NEAR" — without revealing which wallet.</p>
+
+<div class="note">
+<strong>What verification proves.</strong> The report hash, evidence hash
+and policy hash match the record published on NEAR, so the report was not
+altered after publication. The data hash is recomputed from the disclosure
+snapshot, and the claims are re-run from that snapshot, so the claims
+follow from chain data the verifier can re-fetch. The wallet address is
+never shown here — only its hash commitment.
+<strong>What it does not prove.</strong> Nothing about data that never
+touched the chain. A report with no AI summary means "not analysed", not
+"verified by AI".
+</div>
+
+<h2>1. Report</h2>
+<label>Report ID (the onchain claim id)
+<input id="reportId" type="text" placeholder="e.g. a1b2c3d4e5f6a7b8" autocomplete="off">
+</label>
+<label>Report JSON (paste the public report)
+<textarea id="reportJson" placeholder='{"reportId": "...", "prover": "...", ...}'></textarea>
+</label>
+
+<h2>2. Disclosure package (private)</h2>
+<p><strong>Only paste this here, in your own browser.</strong> It contains
+the wallet address. This page sends it nowhere: verification runs locally,
+and the only network calls are two read-only view calls
+(<span class="mono">get_claim</span> and
+<span class="mono">is_claim_valid</span>) to the NEAR testnet RPC.</p>
+<label>Disclosure package JSON
+<textarea id="disclosureJson" placeholder='{"reportId": "...", "address": "...", "snapshot": {...}, "dataHash": "..."}'></textarea>
+</label>
+
+<h2>3. Policy</h2>
+<label>Policy JSON (the rules the claims were evaluated under)
+<textarea id="policyJson">{
+  "balanceAtLeastYocto": "1000000000000000000000000",
+  "stakedAtLeastYocto": "1000000000000000000000000",
+  "minTxCount": 1,
+  "txWindowDays": 30,
+  "minVolumeYocto": "1000000000000000000000000",
+  "volumeWindowDays": 30,
+  "noFailedWindowDays": 30
+}</textarea>
+</label>
+
+<p><button id="verifyBtn" type="button">Verify report</button></p>
+<p id="status"></p>
+<div id="certificate" hidden>
+  <div id="banner" class="banner"></div>
+  <h2>Checks</h2>
+  <div id="checks"></div>
+  <h2>Claims in this report</h2>
+  <div id="claims"></div>
+  <h2>Report facts</h2>
+  <div id="facts"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ================================================================
+  // PURE VERIFY LOGIC — a mirror of src/verify-report.js, src/report.js,
+  // src/canonical.js, src/claims-engine.js and the data-hash part of
+  // src/onchain.js, rebuilt on Web Crypto (crypto.subtle, async) because
+  // the browser cannot use node:crypto and cannot import ../src/
+  // (Vercel serves only public/).
+  //
+  // TWO PATHS, kept in sync by the parity test in
+  // test/verify-report.test.mjs (it runs this exact script in a VM and
+  // asserts identical verdicts to the Node module):
+  // - Node path: src/verify-report.js, sync, node:crypto.
+  // - Browser path: this file, async, Web Crypto.
+  // Check names, order and detail strings are identical in both.
+  // ================================================================
+
+  function canonicalJson(value) {
+    if (value === null) return 'null';
+    if (typeof value === 'string') return JSON.stringify(value);
+    if (typeof value === 'number' || typeof value === 'boolean') return JSON.stringify(value);
+    if (Array.isArray(value)) {
+      return '[' + value.map(function (v) { return v === undefined ? 'null' : canonicalJson(v); }).join(',') + ']';
+    }
+    if (typeof value === 'object') {
+      var keys = Object.keys(value).filter(function (k) { return value[k] !== undefined; }).sort();
+      return '{' + keys.map(function (k) { return JSON.stringify(k) + ':' + canonicalJson(value[k]); }).join(',') + '}';
+    }
+    throw new Error('canonicalJson: cannot serialise ' + typeof value);
+  }
+
+  async function sha256Hex(str) {
+    if (typeof crypto === 'undefined' || !crypto.subtle) {
+      throw new Error('sha256Hex: Web Crypto (crypto.subtle) is unavailable — use a secure context (https or localhost)');
+    }
+    var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  function hashedPayload(report) {
+    var payload = {};
+    for (var k in report) {
+      if (k !== 'reportHash' && k !== 'evidenceHash' && k !== 'policyHash') payload[k] = report[k];
+    }
+    return payload;
+  }
+
+  async function reportHash(report) {
+    if (!report || typeof report !== 'object' || Array.isArray(report)) throw new Error('reportHash: report must be an object');
+    return sha256Hex(canonicalJson(hashedPayload(report)));
+  }
+
+  async function evidenceHash(refs) {
+    var dataHash = refs.dataHash, attestationRef = refs.attestationRef;
+    if (typeof dataHash !== 'string' || dataHash.length === 0) throw new Error('evidenceHash: dataHash must be a non-empty string');
+    if (attestationRef !== null && typeof attestationRef !== 'string') throw new Error('evidenceHash: attestationRef must be null or a string');
+    return sha256Hex(canonicalJson({ attestationRef: attestationRef, dataHash: dataHash }));
+  }
+
+  async function policyHash(policyVersion, policy) {
+    if (typeof policyVersion !== 'string' || policyVersion.length === 0) throw new Error('policyHash: policyVersion must be a non-empty string');
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy)) throw new Error('policyHash: policy must be an object');
+    return sha256Hex(canonicalJson({ policy: policy, policyVersion: policyVersion }));
+  }
+
+  // Mirror of computeDataHash in src/onchain.js: same payload, same
+  // field order, same tx sort. Only the hash primitive differs.
+  async function computeDataHash(accountId, amount, locked, txs) {
+    var sortedTxs = txs.slice().sort(function (a, b) { return a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0; });
+    var payload = {
+      accountId: accountId,
+      amount: String(amount),
+      locked: String(locked),
+      txs: sortedTxs.map(function (t) {
+        return {
+          amountYocto: String(t.amountYocto),
+          blockHeight: t.blockHeight,
+          blockTimestampNs: String(t.blockTimestampNs),
+          hash: t.hash,
+          receiverId: t.receiverId,
+          senderId: t.senderId,
+          status: t.status,
+        };
+      }),
+    };
+    return sha256Hex(canonicalJson(payload));
+  }
+
+  // --- Claims engine: mirror of src/claims-engine.js ---
+  var NS_PER_DAY = 86400n * 1000000000n;
+
+  function toBigInt(value, label) {
+    try {
+      var b = BigInt(value);
+      if (b < 0n) throw new Error('negative');
+      return b;
+    } catch (e) {
+      throw new Error('claims-engine: ' + label + ' must be a non-negative integer, got ' + JSON.stringify(value));
+    }
+  }
+
+  function toDays(days, label) {
+    if (typeof days !== 'number' || !Number.isInteger(days) || days < 0) {
+      throw new Error('claims-engine: ' + label + ' must be a non-negative integer number of days, got ' + JSON.stringify(days));
+    }
+    return days;
+  }
+
+  function requireSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object' || !snapshot.account || !Array.isArray(snapshot.txs)) {
+      throw new Error('claims-engine: snapshot must have { account, txs }');
+    }
+    toBigInt(snapshot.account.amount, 'snapshot.account.amount');
+    toBigInt(snapshot.account.locked, 'snapshot.account.locked');
+    for (var i = 0; i < snapshot.txs.length; i++) {
+      toBigInt(snapshot.txs[i].amountYocto, 'tx.amountYocto');
+      toBigInt(snapshot.txs[i].blockTimestampNs, 'tx.blockTimestampNs');
+    }
+  }
+
+  function txsInWindow(snapshot, days, nowNs) {
+    var now = toBigInt(nowNs, 'nowNs');
+    var start = now - BigInt(toDays(days, 'days')) * NS_PER_DAY;
+    return snapshot.txs.filter(function (tx) {
+      var ts = toBigInt(tx.blockTimestampNs, 'tx.blockTimestampNs');
+      return ts >= start && ts <= now;
+    });
+  }
+
+  function balanceAtLeast(snapshot, amountYocto) {
+    requireSnapshot(snapshot);
+    var threshold = toBigInt(amountYocto, 'amountYocto');
+    var value = toBigInt(snapshot.account.amount, 'snapshot.account.amount');
+    return { id: 'balance_at_least', passed: value >= threshold, value: value.toString(), threshold: threshold.toString() };
+  }
+
+  function stakedAtLeast(snapshot, amountYocto) {
+    requireSnapshot(snapshot);
+    var threshold = toBigInt(amountYocto, 'amountYocto');
+    var value = toBigInt(snapshot.account.locked, 'snapshot.account.locked');
+    return { id: 'staked_at_least', passed: value >= threshold, value: value.toString(), threshold: threshold.toString() };
+  }
+
+  function txCountInWindow(snapshot, days, nowNs) {
+    requireSnapshot(snapshot);
+    var count = txsInWindow(snapshot, days, nowNs).filter(function (tx) { return tx.status === 'Success'; }).length;
+    return { id: 'tx_count_in_window', passed: count >= 1, value: count, threshold: toDays(days, 'days') };
+  }
+
+  function volumeInWindow(snapshot, days, nowNs) {
+    requireSnapshot(snapshot);
+    var accountId = snapshot.account.accountId;
+    var sum = 0n;
+    var inWindow = txsInWindow(snapshot, days, nowNs);
+    for (var i = 0; i < inWindow.length; i++) {
+      var tx = inWindow[i];
+      if (tx.status !== 'Success') continue;
+      if (tx.senderId !== accountId && tx.receiverId !== accountId) continue;
+      sum += toBigInt(tx.amountYocto, 'tx.amountYocto');
+    }
+    return { id: 'volume_in_window', passed: sum > 0n, value: sum.toString(), threshold: toDays(days, 'days') };
+  }
+
+  function noFailedTxsInWindow(snapshot, days, nowNs) {
+    requireSnapshot(snapshot);
+    var failed = txsInWindow(snapshot, days, nowNs).filter(function (tx) { return tx.status === 'Failure'; }).length;
+    return { id: 'no_failed_txs_in_window', passed: failed === 0, value: failed, threshold: toDays(days, 'days') };
+  }
+
+  function evaluateClaims(snapshot, policy, nowNs) {
+    if (policy === void 0) policy = {};
+    requireSnapshot(snapshot);
+    if (policy === null || typeof policy !== 'object' || Array.isArray(policy)) {
+      throw new Error('claims-engine: policy must be an object');
+    }
+    var claims = [];
+    if (policy.balanceAtLeastYocto !== undefined) claims.push(balanceAtLeast(snapshot, policy.balanceAtLeastYocto));
+    if (policy.stakedAtLeastYocto !== undefined) claims.push(stakedAtLeast(snapshot, policy.stakedAtLeastYocto));
+    if (policy.minTxCount !== undefined) {
+      if (policy.txWindowDays === undefined) throw new Error('claims-engine: policy.minTxCount requires policy.txWindowDays');
+      var counted = txCountInWindow(snapshot, policy.txWindowDays, nowNs);
+      var min = toBigInt(policy.minTxCount, 'policy.minTxCount');
+      claims.push({ id: counted.id, passed: BigInt(counted.value) >= min, value: counted.value, threshold: counted.threshold });
+    }
+    if (policy.minVolumeYocto !== undefined) {
+      if (policy.volumeWindowDays === undefined) throw new Error('claims-engine: policy.minVolumeYocto requires policy.volumeWindowDays');
+      var vol = volumeInWindow(snapshot, policy.volumeWindowDays, nowNs);
+      var minVol = toBigInt(policy.minVolumeYocto, 'policy.minVolumeYocto');
+      claims.push({ id: vol.id, passed: BigInt(vol.value) >= minVol, value: vol.value, threshold: vol.threshold });
+    }
+    if (policy.noFailedWindowDays !== undefined) claims.push(noFailedTxsInWindow(snapshot, policy.noFailedWindowDays, nowNs));
+    return { claims: claims, allPassed: claims.every(function (c) { return c.passed; }) };
+  }
+
+  // --- Verify: mirror of src/verify-report.js ---
+  function isObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function shortHash(hash) {
+    return typeof hash === 'string' ? hash : '(missing)';
+  }
+
+  async function verifyReport(args) {
+    var report = args.report, onchainRecord = args.onchainRecord, disclosurePackage = args.disclosurePackage, policy = args.policy, nowNs = args.nowNs;
+    if (!isObject(report)) throw new Error('verifyReport: report must be an object');
+    if (!isObject(onchainRecord)) throw new Error('verifyReport: onchainRecord must be an object');
+    if (!isObject(disclosurePackage)) throw new Error('verifyReport: disclosurePackage must be an object');
+    if (!isObject(disclosurePackage.snapshot)) throw new Error('verifyReport: disclosurePackage.snapshot must be an object');
+    if (!isObject(policy)) throw new Error('verifyReport: policy must be an object');
+    var now;
+    try {
+      now = BigInt(nowNs);
+    } catch (e) {
+      throw new Error('verifyReport: nowNs must be a nanosecond epoch (string, number or bigint)');
+    }
+
+    var checks = [];
+    function check(name, passed, detail) { checks.push({ check: name, passed: passed, detail: detail }); }
+
+    if (typeof disclosurePackage.address !== 'string' || disclosurePackage.address.length === 0) {
+      check('prover_binding', false, 'Disclosure package has no address.');
+    } else if (typeof report.prover !== 'string' || report.prover.length === 0) {
+      check('prover_binding', false, 'Report has no prover commitment.');
+    } else if ((await sha256Hex(disclosurePackage.address)) !== report.prover) {
+      check('prover_binding', false, 'Disclosure address does not hash to the report prover commitment.');
+    } else {
+      check('prover_binding', true, 'Disclosure address hashes to the report prover commitment.');
+    }
+
+    try {
+      var computedReport = await reportHash(report);
+      if (onchainRecord.report_hash === computedReport) {
+        check('report_hash', true, 'Report hash matches the onchain record.');
+      } else {
+        check('report_hash', false, 'Report hash ' + computedReport + ' does not match onchain ' + shortHash(onchainRecord.report_hash) + '.');
+      }
+    } catch (err) {
+      check('report_hash', false, 'Could not compute report hash: ' + err.message);
+    }
+
+    try {
+      var computedEvidence = await evidenceHash(report.evidenceRefs);
+      if (onchainRecord.evidence_hash === computedEvidence) {
+        check('evidence_hash', true, 'Evidence hash matches the onchain record.');
+      } else {
+        check('evidence_hash', false, 'Evidence hash ' + computedEvidence + ' does not match onchain ' + shortHash(onchainRecord.evidence_hash) + '.');
+      }
+    } catch (err) {
+      check('evidence_hash', false, 'Could not compute evidence hash: ' + err.message);
+    }
+
+    try {
+      var computedPolicy = await policyHash(report.policyVersion, policy);
+      if (onchainRecord.policy_hash === computedPolicy) {
+        check('policy_hash', true, 'Policy hash matches the onchain record.');
+      } else {
+        check('policy_hash', false, 'Policy hash ' + computedPolicy + ' does not match onchain ' + shortHash(onchainRecord.policy_hash) + '.');
+      }
+    } catch (err) {
+      check('policy_hash', false, 'Could not compute policy hash: ' + err.message);
+    }
+
+    try {
+      var snap = disclosurePackage.snapshot;
+      var computedData = await computeDataHash(snap.account.accountId, snap.account.amount, snap.account.locked, snap.txs);
+      var ref = report.evidenceRefs && report.evidenceRefs.dataHash;
+      if (computedData === ref) {
+        check('data_hash', true, 'Recomputed data hash matches the report evidence reference.');
+      } else {
+        check('data_hash', false, 'Recomputed data hash ' + computedData + ' does not match report evidence reference ' + shortHash(ref) + '.');
+      }
+    } catch (err) {
+      check('data_hash', false, 'Could not recompute data hash: ' + err.message);
+    }
+
+    try {
+      if (!Array.isArray(report.claims)) {
+        check('claims', false, 'Report claims are not an array.');
+      } else {
+        var rerun = evaluateClaims(disclosurePackage.snapshot, policy, nowNs);
+        var byId = {};
+        rerun.claims.forEach(function (c) { byId[c.id] = c; });
+        var failure = null;
+        if (Array.isArray(report.disclosed)) {
+          var disclosedIds = report.disclosed.slice().sort();
+          var claimIds = report.claims.map(function (c) { return c.id; }).sort();
+          if (JSON.stringify(disclosedIds) !== JSON.stringify(claimIds)) {
+            failure = 'Report disclosed list does not match the report claims.';
+          }
+        }
+        if (!failure) {
+          for (var i = 0; i < report.claims.length; i++) {
+            var claim = report.claims[i];
+            var again = byId[claim.id];
+            if (!again) {
+              failure = 'Claim ' + claim.id + ' was not reproduced by the re-run.';
+              break;
+            }
+            if (again.passed !== claim.passed) {
+              failure = 'Claim ' + claim.id + ' passed value differs (report: ' + claim.passed + ', re-run: ' + again.passed + ').';
+              break;
+            }
+            if (String(again.value) !== String(claim.value)) {
+              failure = 'Claim ' + claim.id + ' value differs (report: ' + claim.value + ', re-run: ' + again.value + ').';
+              break;
+            }
+          }
+        }
+        if (failure) {
+          check('claims', false, failure);
+        } else {
+          check('claims', true, 'All ' + report.claims.length + ' disclosed claim(s) reproduced exactly from the disclosure snapshot.');
+        }
+      }
+    } catch (err) {
+      check('claims', false, 'Claim re-run failed: ' + err.message);
+    }
+
+    (function () {
+      var reasons = [];
+      try {
+        if (!(now < BigInt(report.expiresAt))) reasons.push('Report expired.');
+      } catch (e) {
+        reasons.push('Report expiry unreadable.');
+      }
+      if (onchainRecord.valid === false) {
+        reasons.push('Registry reports the claim invalid (revoked, expired, or missing).');
+      } else if (onchainRecord.valid !== true) {
+        reasons.push('Registry validity result missing.');
+      }
+      if (reasons.length === 0) {
+        check('validity', true, 'Report is unexpired and the registry reports the claim valid.');
+      } else {
+        check('validity', false, reasons.join(' '));
+      }
+    })();
+
+    return { valid: checks.every(function (c) { return c.passed; }), checks: checks };
+  }
+
+  // Exposed for the parity test (test/verify-report.test.mjs runs this
+  // script in a VM) and for the page UI below.
+  var api = {
+    canonicalJson: canonicalJson,
+    sha256Hex: sha256Hex,
+    reportHash: reportHash,
+    evidenceHash: evidenceHash,
+    policyHash: policyHash,
+    computeDataHash: computeDataHash,
+    evaluateClaims: evaluateClaims,
+    verifyReport: verifyReport,
+  };
+  if (typeof window !== 'undefined') window.VeilProofVerify = api;
+
+  // ================================================================
+  // UI — runs only in a real browser.
+  // ================================================================
+  if (typeof document === 'undefined') return;
+
+  var RPC_URL = 'https://rpc.testnet.near.org';
+  var REGISTRY = 'registry.veilproof.testnet';
+
+  function base64Utf8(str) {
+    var bytes = new TextEncoder().encode(str);
+    var bin = '';
+    bytes.forEach(function (b) { bin += String.fromCharCode(b); });
+    return btoa(bin);
+  }
+
+  async function rpcView(method, args) {
+    var res = await fetch(RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'veilproof-verify',
+        method: 'query',
+        params: {
+          request_type: 'call_function',
+          account_id: REGISTRY,
+          method_name: method,
+          args_base64: base64Utf8(JSON.stringify(args)),
+          finality: 'final',
+        },
+      }),
+    });
+    var json = await res.json();
+    if (json.error) throw new Error(json.error.message || json.error.name || 'RPC error');
+    var bytes = json.result.result;
+    var text = new TextDecoder().decode(new Uint8Array(bytes));
+    return JSON.parse(text);
+  }
+
+  function el(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function renderCertificate(result, report, disclosurePackage, policy) {
+    var banner = el('banner');
+    banner.textContent = result.valid ? 'VALID — this report verifies.' : 'INVALID — this report does not verify.';
+    banner.className = 'banner ' + (result.valid ? 'valid' : 'invalid');
+    el('checks').innerHTML = result.checks.map(function (c) {
+      return '<div class="check ' + (c.passed ? 'pass' : 'fail') + '"><span class="mark">' +
+        (c.passed ? '✓' : '✗') + ' ' + esc(c.check) + '</span><div class="detail">' + esc(c.detail) + '</div></div>';
+    }).join('');
+    var claimsHtml = '<table><tr><th>Claim</th><th>Passed</th><th>Value</th><th>Threshold</th></tr>' +
+      report.claims.map(function (c) {
+        return '<tr><td>' + esc(c.id) + '</td><td>' + (c.passed ? 'yes' : 'NO') + '</td><td class="mono">' +
+          esc(c.value) + '</td><td class="mono">' + esc(c.threshold) + '</td></tr>';
+      }).join('') + '</table>';
+    // What was NOT disclosed: claims the re-run finds that the report
+    // does not list. The verifier holds the snapshot, so it can see
+    // them; the public report never did.
+    var undisclosed = [];
+    try {
+      var nowNs = (BigInt(Date.now()) * 1000000n).toString();
+      var rerun = evaluateClaims(disclosurePackage.snapshot, policy, nowNs);
+      var inReport = {};
+      report.claims.forEach(function (c) { inReport[c.id] = true; });
+      undisclosed = rerun.claims.filter(function (c) { return !inReport[c.id]; }).map(function (c) { return c.id; });
+    } catch (e) {
+      undisclosed = [];
+    }
+    if (undisclosed.length > 0) {
+      claimsHtml += '<p><strong>Not disclosed in this report:</strong> ' + undisclosed.map(esc).join(', ') +
+        '. These claims were evaluated from the disclosure snapshot but the prover chose not to put them in the public report.</p>';
+    } else {
+      claimsHtml += '<p>Nothing withheld: every claim evaluated from the disclosure snapshot is in this report.</p>';
+    }
+    el('claims').innerHTML = claimsHtml;
+    var expires = 'unreadable';
+    try { expires = new Date(Number(BigInt(report.expiresAt) / 1000000n)).toISOString(); } catch (e) { /* keep unreadable */ }
+    var ai = report.aiSummary === null
+      ? 'Not analysed — no AI summary was attached to this report.'
+      : 'Attached (see report JSON).';
+    el('facts').innerHTML =
+      '<p>Report ID: <span class="mono">' + esc(report.reportId) + '</span></p>' +
+      '<p>Prover commitment (SHA-256 of the wallet address — the address itself is never shown):<br><span class="mono">' + esc(report.prover) + '</span></p>' +
+      '<p>Policy version: <span class="mono">' + esc(report.policyVersion) + '</span></p>' +
+      '<p>Created: <span class="mono">' + esc(report.createdAt) + '</span></p>' +
+      '<p>Expires: <span class="mono">' + esc(expires) + '</span></p>' +
+      '<p>AI summary: ' + esc(ai) + '</p>';
+    el('certificate').hidden = false;
+  }
+
+  el('verifyBtn').addEventListener('click', async function () {
+    var status = el('status');
+    el('certificate').hidden = true;
+    status.textContent = '';
+    status.className = '';
+    var reportId = el('reportId').value.trim();
+    if (!reportId) {
+      status.textContent = 'Enter a report ID.';
+      status.className = 'error';
+      return;
+    }
+    var report, disclosurePackage, policy;
+    try {
+      report = JSON.parse(el('reportJson').value);
+      disclosurePackage = JSON.parse(el('disclosureJson').value);
+      policy = JSON.parse(el('policyJson').value);
+    } catch (err) {
+      status.textContent = 'Could not parse pasted JSON: ' + err.message;
+      status.className = 'error';
+      return;
+    }
+    status.textContent = 'Fetching the onchain record…';
+    var record;
+    try {
+      record = await rpcView('get_claim', { claim_id: reportId });
+    } catch (err) {
+      status.textContent = 'RPC error fetching get_claim: ' + err.message;
+      status.className = 'error';
+      return;
+    }
+    if (record === null || record === undefined) {
+      status.textContent = 'No onchain record found for report ID ' + reportId + ' — this report was never published (or the ID is wrong).';
+      status.className = 'error';
+      return;
+    }
+    var valid;
+    try {
+      valid = await rpcView('is_claim_valid', { claim_id: reportId });
+    } catch (err) {
+      valid = undefined;
+    }
+    var onchainRecord = {
+      report_hash: record.report_hash,
+      evidence_hash: record.evidence_hash,
+      policy_hash: record.policy_hash,
+      valid: valid,
+    };
+    var nowNs = (BigInt(Date.now()) * 1000000n).toString();
+    status.textContent = 'Verifying…';
+    try {
+      var result = await verifyReport({ report: report, onchainRecord: onchainRecord, disclosurePackage: disclosurePackage, policy: policy, nowNs: nowNs });
+      status.textContent = '';
+      renderCertificate(result, report, disclosurePackage, policy);
+    } catch (err) {
+      status.textContent = 'Verification failed to run: ' + err.message;
+      status.className = 'error';
+    }
+  });
+})();
+</script>
+</body>
+</html>

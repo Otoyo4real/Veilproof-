@@ -1,0 +1,29 @@
+{
+  "accountId": "veilproof-demo.testnet",
+  "transfers": [
+    {
+      "hash": "EQeaPK7R7nzT14a6e5kc685Yug45LDMxP4K7YhTxYn9g",
+      "senderId": "veilproof.testnet",
+      "receiverId": "veilproof-demo.testnet",
+      "amountNear": "1"
+    },
+    {
+      "hash": "6xVgB3RuqhR6wHWigWoqxZVMoqQbUvvTVW19BAYL94Dj",
+      "senderId": "veilproof-demo.testnet",
+      "receiverId": "veilproof.testnet",
+      "amountNear": "0.5"
+    },
+    {
+      "hash": "EZd6dsgPtyXJrWcdUMKtJqe611Mw3aKkAs7bqybxVMfE",
+      "senderId": "veilproof.testnet",
+      "receiverId": "veilproof-demo.testnet",
+      "amountNear": "0.25"
+    },
+    {
+      "hash": "3Nk4rX9GURp8cK4cwShkJHNeMyWRy8MUpPxAZ2hY3hrT",
+      "senderId": "veilproof-demo.testnet",
+      "receiverId": "veilproof.testnet",
+      "amountNear": "0.1"
+    }
+  ]
+}

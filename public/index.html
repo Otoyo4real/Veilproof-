@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeilProof — Prove onchain claims without revealing your wallet</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; color: #1a1a1a; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; border-top: 1px solid #ddd; padding-top: 1rem; }
+  textarea, input, select { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 0.5rem; margin: 0.25rem 0 1rem; }
+  textarea { min-height: 5rem; }
+  label { display: block; font-size: 0.95rem; }
+  button { font-size: 1rem; padding: 0.6rem 1.2rem; cursor: pointer; margin: 0.25rem 0.5rem 0.25rem 0; }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
+  .note { background: #f5f5f5; padding: 0.75rem 1rem; font-size: 0.9rem; }
+  .warn { background: #fef3c7; padding: 0.75rem 1rem; font-size: 0.9rem; }
+  .error { color: #991b1b; font-weight: bold; }
+  .ok { color: #166534; font-weight: bold; }
+  .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; word-break: break-all; }
+  pre { background: #f5f5f5; padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; font-size: 0.9rem; }
+  .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .row > label { flex: 1 1 200px; }
+  .muted { color: #555; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<h1>VeilProof — Prove onchain claims without revealing your wallet</h1>
+<p>Prove claims like "balance at least 1 NEAR" about a NEAR testnet wallet,
+without revealing which wallet. The data comes from the chain, so it is
+genuine by definition. Only a hash commitment of your address is ever
+published — the address itself travels only in the private disclosure
+package you hand to the verifier you chose.</p>
+
+<div class="note">
+<strong>What this page does — and does not do.</strong> Everything on this
+page runs in your browser: the snapshot is fetched from the public NEAR
+testnet RPC, the claims are evaluated locally, and the report is built
+locally. The only thing that leaves your browser besides read-only RPC
+calls is (a) an optional AI analysis request carrying claim-level data
+only — never your address, never transaction hashes — and (b) the signed
+publish transaction, which records only hashes onchain. A report with no
+AI summary means "not analysed", never "verified by AI".
+</div>
+
+<p><a href="verify.html">Verifier portal — check a published report &rarr;</a></p>
+
+<h2>1. Connect your wallet (NEAR testnet)</h2>
+<p><button id="connectBtn" type="button">Connect wallet</button></p>
+<p id="walletStatus" class="muted">Not connected. Meteor and MyNearWallet are supported.</p>
+<p id="accountLine" class="mono"></p>
+
+<h2>2. Prove you own the wallet (optional, recommended)</h2>
+<p>Sign a short ownership challenge with the connected wallet. The
+signature is shown here as evidence; the publish transaction in step 6
+is the binding proof onchain (the registry records the signer as the
+claim owner).</p>
+<p><button id="challengeBtn" type="button" disabled>Sign ownership challenge</button></p>
+<div id="challengeOut"></div>
+
+<h2>3. Fetch your onchain snapshot</h2>
+<p>Paste the transaction hashes you want the claims evaluated over, one
+per line. A bare hash is assumed to be yours; use
+<span class="mono">hash,senderId</span> for incoming transfers sent by
+someone else. Hashes that cannot be verified onchain are skipped.</p>
+<label>Transaction hashes (base58, one per line)
+<textarea id="txHashes" placeholder="EQeaPK7R7nzT14a6e5kc685Yug45LDMxP4K7YhTxYn9g,sender.testnet"></textarea>
+</label>
+<p>
+  <button id="loadDemoBtn" type="button" disabled>Load demo history</button>
+  <button id="fetchSnapshotBtn" type="button" disabled>Fetch snapshot</button>
+</p>
+<div id="snapshotOut"></div>
+
+<h2>4. Choose the policy, evaluate the claims</h2>
+<p>Leave a field blank to skip that claim. Thresholds are in NEAR.
+Windows are in days. A minimum tx count or volume needs its window.</p>
+<div class="row">
+  <label>Balance at least (NEAR)<input id="polBalance" type="text" inputmode="decimal" placeholder="1"></label>
+  <label>Staked at least (NEAR)<input id="polStaked" type="text" inputmode="decimal" placeholder=""></label>
+</div>
+<div class="row">
+  <label>Minimum tx count<input id="polMinTx" type="text" inputmode="numeric" placeholder="1"></label>
+  <label>Tx window (days)<input id="polTxWindow" type="text" inputmode="numeric" placeholder="30"></label>
+</div>
+<div class="row">
+  <label>Minimum volume (NEAR)<input id="polMinVol" type="text" inputmode="decimal" placeholder="1"></label>
+  <label>Volume window (days)<input id="polVolWindow" type="text" inputmode="numeric" placeholder="30"></label>
+</div>
+<div class="row">
+  <label>No failed txs in window (days)<input id="polNoFailed" type="text" inputmode="numeric" placeholder="30"></label>
+</div>
+<p><button id="evaluateBtn" type="button" disabled>Evaluate claims</button></p>
+<div id="claimsOut"></div>
+
+<h2>5. Disclose, analyse, build the report</h2>
+<p>Choose which evaluated claims go into the public report. Claims you
+leave out are simply absent from the report — the verifier never sees
+them unless you disclose them another way.</p>
+<div id="discloseList"></div>
+<label>Report expiry
+<select id="expirySelect">
+  <option value="7">7 days</option>
+  <option value="30" selected>30 days</option>
+  <option value="90">90 days</option>
+</select>
+</label>
+<p>
+  <button id="aiBtn" type="button" disabled>Analyse with NEAR AI</button>
+  <button id="buildReportBtn" type="button" disabled>Build report</button>
+</p>
+<p id="aiStatus" class="muted">AI analysis not run yet. The report will say "not analysed" unless you run it.</p>
+<div id="reportOut"></div>
+<p>
+  <button id="downloadReportBtn" type="button" disabled>Download report JSON</button>
+  <button id="downloadDisclosureBtn" type="button" disabled>Download disclosure package JSON</button>
+</p>
+
+<h2>6. Publish the hashes onchain</h2>
+<div class="warn">
+<strong>Publishing is a real testnet transaction, signed by your wallet.</strong>
+Only the three hashes and the report id go onchain — never your address,
+never amounts, never transactions. The contract charges storage at cost
+and refunds any excess deposit.
+</div>
+<div id="publishBox">
+  <p id="publishCost" class="muted">Build a report first — the cost preview appears here.</p>
+  <label><input id="publishConfirm" type="checkbox" style="width:auto"> I have checked the report above and want to publish its hashes.</label>
+  <p><button id="publishBtn" type="button" disabled>Publish onchain</button></p>
+  <div id="publishOut"></div>
+</div>
+
+<p class="muted">VeilProof — NEAR Hackathon 2026, Privacy &amp; Private AI track.
+Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
+
+<script src="https://cdn.jsdelivr.net/npm/@fastnear/wallet@2.5.0/dist/umd/browser.global.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

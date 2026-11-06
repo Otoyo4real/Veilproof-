@@ -1,0 +1,9 @@
+node_modules/
+.target/
+target/
+.env
+.env.*
+.testnet-accounts.json
+*.log
+.DS_Store
+dist/
