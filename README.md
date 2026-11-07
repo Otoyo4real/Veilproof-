@@ -41,10 +41,6 @@ npm install && npm test && npm run audit && npm run demo
 - `npm run audit` runs the privacy audit: an attacker with only public data tries to recover a wallet address, link two reports to the same prover, and estimate the exact balance or score, then prints the results table.
 - `npm run demo` builds a report from the committed demo history and verifies all 10 checks locally, no wallet or key needed.
 
-## Security remediation and registry v2
-
-This repo was audited against a security, privacy and verification remediation spec and the confirmed findings were fixed in code. The audit confirmed six real issues: the registry exposed the treasury wallet as a public owner, the AI attestation was a nonce echo rather than cryptographic verification, the sampling could not prove continuous possession, the score had no manipulation detection, the contract had open publish and no caps, and the UI showed a single VALID badge instead of separate verification fields. All six are addressed in this repo. The Rust contract v2 is implemented and tested (43/43), deployed, and migrated on 2026-11-07: the live registry is now v2, the treasury never appears onchain, and publishing is restricted to an authorized publisher allowlist. See [docs/contract-migration.md](docs/contract-migration.md).
-
 ## What this proves, and what it does not
 
 | Claim | What proves it |
@@ -203,3 +199,7 @@ testnet registry, and a failed check says so.
 11. Verifier refetches the chain data and confirms the claims.
 12. A tampered report fails integrity verification.
 13. A revoked report is rejected.
+
+## Security remediation and registry v2
+
+This repo was audited against a security, privacy and verification remediation spec and the confirmed findings were fixed in code. The audit confirmed six real issues: the registry exposed the treasury wallet as a public owner, the AI attestation was a nonce echo rather than cryptographic verification, the sampling could not prove continuous possession, the score had no manipulation detection, the contract had open publish and no caps, and the UI showed a single VALID badge instead of separate verification fields. All six are addressed in this repo. The Rust contract v2 is implemented and tested (43/43), deployed, and migrated on 2026-11-07: the live registry is now v2, the treasury never appears onchain, and publishing is restricted to an authorized publisher allowlist. See [docs/contract-migration.md](docs/contract-migration.md).
