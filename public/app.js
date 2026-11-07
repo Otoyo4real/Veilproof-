@@ -1,17 +1,18 @@
 // VeilProof prover app — runs entirely in the prover's browser.
 //
-// Flow: paste a wallet address to preview (no wallet needed — the chain
-// is public) -> connect the wallet that owns that address -> optional
-// ownership challenge -> fetch onchain snapshot -> choose policy ->
-// evaluate claims -> choose what to disclose -> optional NEAR AI
-// analysis -> build report -> publish the three hashes onchain.
+// Flow: connect the wallet to prove (its address is the wallet in
+// the report, nothing to type) or load the demo history to try
+// without a wallet -> optional ownership challenge -> fetch onchain
+// snapshot -> choose policy -> evaluate claims -> choose what to
+// disclose -> optional NEAR AI analysis -> build report -> publish
+// the three hashes onchain.
 //
-// The preview is read-only: anyone can read any wallet's onchain data,
-// so a preview proves nothing about who you are. Ownership is proved
-// only by the wallet: the challenge signature and the publish
-// transaction must come from the wallet that owns the previewed
-// address. previewMatchesConnected() enforces that binding at every
-// step that needs it, and publish() refuses to sign otherwise.
+// Reading is read-only: anyone can read any wallet's onchain data,
+// so fetching a snapshot proves nothing about who you are. Ownership
+// is proved only by the wallet: the challenge signature and the
+// publish transaction must come from the wallet that owns the address
+// being proved. previewMatchesConnected() enforces that binding at
+// every step that needs it, and publish() refuses to sign otherwise.
 //
 // Privacy, by construction:
 // - The snapshot, the address and the tx hashes never leave this
@@ -133,6 +134,15 @@ function saveState() {
         report: state.report,
         disclosurePackage: state.disclosurePackage,
         hashes: state.hashes,
+        // The snapshot inputs live in textareas, not in state, so they
+        // must be saved too: after a reload the fields would otherwise
+        // disagree with the restored state (e.g. a link hash with no
+        // linked address), and the next fetch would fail on stale
+        // input the user cannot see. Guarded: these ids exist on the
+        // prove page only.
+        linkedAddresses: $('linkedAddresses') ? $('linkedAddresses').value : '',
+        linkedTxHashes: $('linkedTxHashes') ? $('linkedTxHashes').value : '',
+        txHashes: $('txHashes') ? $('txHashes').value : '',
       }),
     );
   } catch (_) {
@@ -152,24 +162,34 @@ function loadState() {
   }
 }
 
-// The address the prover is previewing. Reading is public, so this
-// needs no wallet — but it proves nothing about ownership. The value
-// is normalised to lowercase and validated as a NEAR account id:
-// 2-64 chars of a-z, 0-9, '.', '_' or '-', ending in .near or
-// .testnet, or a 64-hex implicit account.
-function readPreviewAddress() {
-  const raw = $('previewAddress').value.trim().toLowerCase();
-  if (!raw) throw new Error('Enter a wallet address to preview (e.g. veilproof-demo.testnet).');
-  const named = /^[a-z0-9._-]{2,64}$/.test(raw) && (raw.endsWith('.near') || raw.endsWith('.testnet'));
-  const implicit = /^[0-9a-f]{64}$/.test(raw);
-  if (!named && !implicit) {
-    throw new Error(
-      'That does not look like a NEAR address, use a named account ending in .near or .testnet, or a 64 character hex account.',
-    );
+// The address being proved. It is set by connecting a wallet (step 1)
+// or by loading the demo history, never typed. A new address means a
+// new snapshot: everything downstream was about the old address and
+// must go, so a stale report can never be published under a new one.
+function setProvingAddress(next) {
+  const address = (next || '').trim().toLowerCase() || null;
+  if (state.snapshot && state.snapshot.account.accountId !== address) {
+    state.snapshot = null;
+    state.policy = null;
+    state.evaluation = null;
+    state.aiSummary = null;
+    state.attestationRef = null;
+    invalidateReport('the address being proved changed.');
+    $('snapshotOut').innerHTML = '';
+    $('claimsOut').innerHTML = '';
+    $('discloseList').innerHTML = '';
+    updateWalletUI();
   }
-  state.previewAddress = raw;
+  state.previewAddress = address;
   saveState();
-  return raw;
+}
+
+// The address being proved comes from the connected wallet (step 1)
+// or the demo history, never from a typed field. There is no preview
+// address to type: the wallet you connect IS the wallet you prove.
+function readPreviewAddress() {
+  if (state.previewAddress) return state.previewAddress;
+  throw new Error('Connect your wallet, or load the demo history, first.');
 }
 
 // True only when the connected wallet is the wallet that owns the
@@ -231,24 +251,30 @@ function updateWalletUI() {
   $('walletStatus').textContent = state.accountId
     ? 'Connected on testnet. Ready to prove claims.'
     : 'Not connected. Meteor and MyNearWallet are supported.';
+  const proving = $('provingLine');
+  if (proving) {
+    proving.textContent = state.previewAddress
+      ? `Proving: ${state.previewAddress}`
+      : 'No wallet set yet. Connect your wallet, or load the demo history, to set the wallet being proved.';
+  }
   const connected = Boolean(state.accountId);
   const matches = previewMatchesConnected();
-  // Preview needs no wallet: the chain is public, so the demo load,
-  // the snapshot fetch and the claims all work before any wallet is
-  // connected. Only the steps that prove ownership need the wallet,
-  // and they need the wallet that OWNS the previewed address.
+  // The snapshot fetch and the claims work before any wallet is
+  // connected: the chain is public, and the demo history sets the
+  // address. Only the steps that prove ownership need the wallet,
+  // and they need the wallet that OWNS the address being proved.
   $('loadDemoBtn').disabled = false;
   $('fetchSnapshotBtn').disabled = false;
   $('challengeBtn').disabled = !(connected && matches);
   if (connected && !matches && !state.challenge) {
     $('challengeOut').innerHTML =
-      '<p class="warn">Connected wallet <span class="mono">' + esc(state.accountId) + '</span> does not own the previewed address' +
+      '<p class="warn">Connected wallet <span class="mono">' + esc(state.accountId) + '</span> does not own the address being proved' +
       (state.previewAddress ? ' <span class="mono">' + esc(state.previewAddress) + '</span>' : '') +
-      '. Switch wallets to sign the challenge for the previewed address, or preview a different address.</p>';
+      '. Switch to the wallet that owns it to sign the challenge.</p>';
   }
   // Evaluate fetches the snapshot itself when there is none yet, so the
-  // button is never greyed out for lack of one. It only needs an
-  // address to preview and at least one policy field set.
+  // button is never greyed out for lack of one. It only needs a wallet
+  // set (connected wallet or demo) and at least one policy field set.
   $('evaluateBtn').disabled = false;
   const evaluateHint = $('evaluateHint');
   if (evaluateHint) {
@@ -289,8 +315,10 @@ async function connectWallet() {
       return;
     }
     state.accountId = id;
+    // Connecting a wallet means proving that wallet: its address
+    // becomes the address being proved.
+    setProvingAddress(id);
     updateWalletUI();
-    saveState();
   } catch (err) {
     $('walletStatus').textContent = 'Wallet error: ' + err.message;
   }
@@ -396,7 +424,7 @@ async function signChallenge() {
       '<p class="mono">Signature: ' + esc(signature || '(not returned)') + '</p>' +
       '<p>' + esc(keyCheck) + '</p>' +
       '<p class="muted">Full cryptographic verification of the NEP 413 payload is not done here, ' +
-      'the publish transaction in step 5 is the binding proof onchain (the registry records the signer as the claim owner).</p>';
+      'the publish transaction in step 4 is the binding proof onchain (the registry records the signer as the claim owner).</p>';
     saveState();
   } catch (err) {
     out.innerHTML =
@@ -427,10 +455,10 @@ async function loadDemoHistory() {
     const res = await fetch('./demo-history.json');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const history = await res.json();
-    // No wallet needed: the demo history is public testnet data. Fill
-    // the preview address too, so the preview is one click.
-    $('previewAddress').value = history.accountId;
-    state.previewAddress = history.accountId;
+    // No wallet needed: the demo history is public testnet data. The
+    // demo account becomes the address being proved, so the snapshot
+    // is one click.
+    setProvingAddress(history.accountId);
     $('txHashes').value = history.transfers.map((t) => `${t.hash},${t.senderId}`).join('\n');
     $('snapshotOut').innerHTML =
       '<p class="ok">Demo history loaded: ' + history.transfers.length + ' transfers for <span class="mono">' +
@@ -457,14 +485,19 @@ function parseLinkedAddresses() {
 // One line per linked wallet, same order; a blank line means that
 // wallet will link by signature instead of by transfer (the user
 // signs the link statement in the snapshot step). Fewer lines than
-// addresses is fine (the rest are blanks); more is an error.
+// addresses is fine (the rest are blanks). Extra lines with no
+// matching linked wallet are ignored, not an error: a stale hash
+// left in the box after a reload must not block the whole snapshot,
+// and a hash with no wallet to link cannot be verified or used
+// anyway. Trailing blank lines (e.g. from pasting with a trailing
+// newline) do not count.
 function parseLinkTxHashes(count) {
   const raw = $('linkedTxHashes').value.split('\n').map((l) => l.trim());
-  if (raw.length > count) {
-    throw new Error(`Expected at most ${count} link transfer hash(es), one per linked wallet, got ${raw.length}.`);
-  }
-  while (raw.length < count) raw.push('');
-  return raw.map((h) => (h === '' ? null : h));
+  while (raw.length && raw[raw.length - 1] === '') raw.pop();
+  const ignored = Math.max(0, raw.length - count);
+  const lines = raw.slice(0, count);
+  while (lines.length < count) lines.push('');
+  return { hashes: lines.map((h) => (h === '' ? null : h)), ignored };
 }
 
 async function fetchSnapshot() {
@@ -473,7 +506,7 @@ async function fetchSnapshot() {
     const address = readPreviewAddress();
     const entries = parseTxLines();
     // Auto-detect the recent transaction history from the indexer, so
-    // the user never has to paste hashes. The signature in step 2
+    // the user never has to paste hashes. The signature in step 1
     // proves ownership, but it produces no transaction hash, so there
     // is nothing to paste from it. Manually pasted hashes are merged
     // in (dedup by hash) for txs the indexer may not list, e.g. older
@@ -487,7 +520,7 @@ async function fetchSnapshot() {
       }
     }
     const linkedAddresses = parseLinkedAddresses();
-    const linkHashes = parseLinkTxHashes(linkedAddresses.length);
+    const { hashes: linkHashes, ignored: ignoredLinkHashes } = parseLinkTxHashes(linkedAddresses.length);
     const sampleHours = Number($('sampleWindow').value);
     const sampleOpts = sampleHours > 0 ? { balanceSamples: { windowHours: sampleHours, samples: 4 } } : {};
     out.innerHTML = '<p class="muted">Fetching account state for <span class="mono">' + esc(address) + '</span> and verifying ' + entries.length + ' transaction(s)…</p>';
@@ -538,6 +571,11 @@ async function fetchSnapshot() {
     }
     invalidateReport('a new snapshot was fetched.');
     renderSnapshot(snapshot, address, entries.length, sampleHours);
+    if (ignoredLinkHashes > 0) {
+      out.innerHTML +=
+        '<p class="muted">Ignored ' + ignoredLinkHashes + ' link transfer hash(es) with no matching linked wallet address. ' +
+        'Add the linked wallet address above, or clear the hash box.</p>';
+    }
     updateWalletUI();
     saveState();
     return null;
@@ -928,7 +966,7 @@ async function buildReportAndHashes() {
   const out = $('reportOut');
   try {
     if (!state.evaluation || !state.snapshot) throw new Error('Evaluate the claims first.');
-    if (!state.previewAddress) throw new Error('Enter a wallet address to preview first.');
+    if (!state.previewAddress) throw new Error('Connect your wallet, or load the demo history, first.');
     const disclosed = Array.from(document.querySelectorAll('#discloseList input[type="checkbox"]:checked')).map(
       (box) => box.dataset.claim,
     );
@@ -1078,7 +1116,7 @@ async function publish() {
     // binding check is the same either way.)
     if (!previewMatchesConnected()) {
       throw new Error(
-        'Connect the wallet that owns ' + (state.previewAddress || 'the previewed address') +
+        'Connect the wallet that owns ' + (state.previewAddress || 'the address being proved') +
           ' before publishing, the connected wallet ' + (state.accountId || '(none)') + ' does not own it.',
       );
     }
@@ -1181,7 +1219,11 @@ function handleRedirectResult() {
 }
 
 function restoreUIFromState() {
-  if (state.previewAddress) $('previewAddress').value = state.previewAddress;
+  // Restore the snapshot inputs too, so a reload cannot leave a stale
+  // hash in a box whose matching address field was cleared.
+  if (state.linkedAddresses !== undefined) $('linkedAddresses').value = state.linkedAddresses;
+  if (state.linkedTxHashes !== undefined) $('linkedTxHashes').value = state.linkedTxHashes;
+  if (state.txHashes !== undefined) $('txHashes').value = state.txHashes;
   if (state.accountId) updateWalletUI();
   if (state.challenge) {
     $('challengeOut').innerHTML =
@@ -1226,26 +1268,12 @@ window.addEventListener('load', async () => {
   $('challengeBtn').addEventListener('click', signChallenge);
   $('loadDemoBtn').addEventListener('click', loadDemoHistory);
   $('fetchSnapshotBtn').addEventListener('click', fetchSnapshot);
-  $('previewAddress').addEventListener('change', () => {
-    const next = $('previewAddress').value.trim().toLowerCase();
-    // A new address means a new snapshot: everything downstream was
-    // about the old address and must go, so a stale report can never
-    // be published under a new address.
-    if (state.snapshot && state.snapshot.account.accountId !== next) {
-      state.snapshot = null;
-      state.policy = null;
-      state.evaluation = null;
-      state.aiSummary = null;
-      state.attestationRef = null;
-      invalidateReport('the previewed address changed.');
-      $('snapshotOut').innerHTML = '';
-      $('claimsOut').innerHTML = '';
-      $('discloseList').innerHTML = '';
-      updateWalletUI();
-    }
-    state.previewAddress = next || null;
-    saveState();
-  });
+  // Save the snapshot inputs as the user types, so a reload never
+  // loses them and the fields cannot disagree with the saved state.
+  for (const id of ['linkedAddresses', 'linkedTxHashes', 'txHashes']) {
+    const el = $(id);
+    if (el) el.addEventListener('input', saveState);
+  }
   $('evaluateBtn').addEventListener('click', evaluate);
   $('aiBtn').addEventListener('click', runAiAnalysis);
   $('buildReportBtn').addEventListener('click', buildReportAndHashes);
@@ -1274,6 +1302,10 @@ window.addEventListener('load', async () => {
     const id = restored && typeof restored.accountId === 'string' ? restored.accountId : null;
     if (id && !state.accountId) {
       state.accountId = id;
+      // Only make the restored wallet the proving address when nothing
+      // is being proved yet, so a saved demo session is not wiped by a
+      // stale wallet session on reload.
+      if (!state.previewAddress) setProvingAddress(id);
       updateWalletUI();
       saveState();
     }

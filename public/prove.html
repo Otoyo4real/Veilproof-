@@ -26,8 +26,8 @@
 <section class="page-hero">
   <p class="eyebrow">Prover</p>
   <h1>Prove a Wallet</h1>
-  <p class="lede">Preview any wallet with no wallet connected; connect only to
-  sign and publish. Everything on this page runs in your browser, and
+  <p class="lede">Connect the wallet you want to prove, fill in the policy,
+  and evaluate its claims. Everything on this page runs in your browser, and
   publishing records only hashes, never your address, never amounts.</p>
 </section>
 
@@ -43,16 +43,29 @@
 
   <div class="flow">
   <section class="card" id="step-1">
-    <div class="step-head"><span class="step-num">1</span><h2>Preview a wallet, no wallet needed</h2></div>
-    <p>Paste any NEAR address and see its claims. The chain is public, so
-    everything in steps 1 to 4 runs in your browser with no wallet connected.
-    You only connect a wallet to sign the challenge and publish, and it
-    must be the wallet that owns the address you previewed. A preview alone
-    proves nothing about who you are; the signature is the proof.</p>
-    <label>Wallet address (.near or .testnet)
-    <input id="previewAddress" type="text" placeholder="e.g. alice.testnet" autocomplete="off" spellcheck="false">
-    </label>
-    <p class="muted">You can paste a named account (.near or .testnet) or a 64 character hex wallet address. Previewing is read only and needs no wallet. You only connect a wallet later, in step 2, to prove you own the address.</p>
+    <div class="step-head"><span class="step-num">1</span><h2>Connect your wallet</h2></div>
+    <p>Connect the wallet you want to prove. Its address is the wallet in
+    the report, you never type it. The chain is read, never written to,
+    until you choose to publish. Sign the short ownership challenge so a
+    lender trusts the report, only the owner of the key could have made
+    it. Publishing in step 4 is a transaction from the same wallet.</p>
+    <p><button id="connectBtn" type="button">Connect wallet</button></p>
+    <p id="walletStatus" class="muted">Not connected. Meteor and MyNearWallet are supported.</p>
+    <p id="accountLine" class="mono"></p>
+    <p id="provingLine" class="mono"></p>
+    <p><button id="challengeBtn" type="button" disabled>Sign ownership challenge</button></p>
+    <div id="challengeOut"></div>
+    <p class="muted">No wallet? Try the demo instead, it sets the demo wallet
+    as the wallet being proved, no wallet needed.</p>
+    <p><button id="loadDemoBtn" type="button">Load demo history</button></p>
+  </section>
+
+  <section class="card" id="step-2">
+    <div class="step-head"><span class="step-num">2</span><h2>Fetch the snapshot, choose the policy, evaluate the claims</h2></div>
+    <p>Fetch the onchain snapshot for the wallet from step 1, then set the
+    policy and evaluate. Leave a policy field blank to skip that claim.
+    Thresholds are in NEAR. Windows are in days. A minimum tx count or
+    volume needs its window.</p>
     <label>Transaction hashes (base58, one per line, optional)
     <textarea id="txHashes" placeholder="EQeaPK7R7nzT14a6e5kc685Yug45LDMxP4K7YhTxYn9g,sender.testnet"></textarea>
     </label>
@@ -86,29 +99,9 @@
     report can prove a balance was HELD, not just deposited an hour
     ago. The account must be older than the window you pick.</p>
     <p>
-      <button id="loadDemoBtn" type="button">Load demo history</button>
       <button id="fetchSnapshotBtn" type="button">Fetch snapshot</button>
     </p>
     <div id="snapshotOut"></div>
-  </section>
-
-  <section class="card" id="step-2">
-    <div class="step-head"><span class="step-num">2</span><h2>Connect your wallet to sign</h2></div>
-    <p>Connect the wallet that owns the address you previewed, then sign a
-    short ownership challenge. The signature is what a lender trusts, only
-    the owner of the key could have made it. Publishing in step 5 is a
-    transaction from the same wallet.</p>
-    <p><button id="connectBtn" type="button">Connect wallet</button></p>
-    <p id="walletStatus" class="muted">Not connected. Meteor and MyNearWallet are supported.</p>
-    <p id="accountLine" class="mono"></p>
-    <p><button id="challengeBtn" type="button" disabled>Sign ownership challenge</button></p>
-    <div id="challengeOut"></div>
-  </section>
-
-  <section class="card" id="step-3">
-    <div class="step-head"><span class="step-num">3</span><h2>Choose the policy, evaluate the claims</h2></div>
-    <p>Leave a field blank to skip that claim. Thresholds are in NEAR.
-    Windows are in days. A minimum tx count or volume needs its window.</p>
     <div class="row">
       <label>Balance at least (NEAR)<input id="polBalance" type="text" inputmode="decimal" placeholder="1"></label>
       <label>Staked at least (NEAR)<input id="polStaked" type="text" inputmode="decimal" placeholder=""></label>
@@ -148,8 +141,8 @@
     <div id="scoreOut"></div>
   </section>
 
-  <section class="card" id="step-4">
-    <div class="step-head"><span class="step-num">4</span><h2>Disclose, analyse, build the report</h2></div>
+  <section class="card" id="step-3">
+    <div class="step-head"><span class="step-num">3</span><h2>Disclose, analyse, build the report</h2></div>
     <p>Choose which evaluated claims go into the public report. Claims you
     leave out are simply absent from the report, the verifier never sees
     them unless you disclose them another way.</p>
@@ -188,8 +181,8 @@
     <div id="encryptOut"></div>
   </section>
 
-  <section class="card" id="step-5">
-    <div class="step-head"><span class="step-num">5</span><h2>Publish the hashes onchain</h2></div>
+  <section class="card" id="step-4">
+    <div class="step-head"><span class="step-num">4</span><h2>Publish the hashes onchain</h2></div>
     <div class="warn">
     <strong>Publishing is a real testnet transaction, signed by your wallet.</strong>
     Only the three hashes and the report id go onchain, never your address,

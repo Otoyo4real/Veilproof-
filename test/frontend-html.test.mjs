@@ -19,7 +19,7 @@ const appJs = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
 
 // The prover ids live on prove.html; the live demo ids live on demo.html.
 const PROVER_IDS = [
-  'previewAddress',
+  'provingLine',
   'connectBtn',
   'walletStatus',
   'accountLine',
@@ -141,25 +141,29 @@ test('no page hardcodes a wallet address', () => {
   }
 });
 
-test('preview flow: paste an address to preview, wallet only to sign and publish', () => {
-  // The preview is read-only and needs no wallet; ownership is proved
-  // only by the connected wallet that owns the previewed address.
-  assert.ok(proveHtml.includes('id="previewAddress"'), 'prove.html must have the preview address input');
-  assert.ok(appJs.includes('readPreviewAddress'), 'app.js must read and validate the preview address');
+test('prover flow: connect wallet sets the address, no address to type', () => {
+  // The wallet you connect IS the wallet you prove: there is no
+  // address field to type. The demo load sets the demo account
+  // instead, for trying without a wallet. Ownership is proved only
+  // by the connected wallet that owns the address being proved.
+  assert.ok(proveHtml.includes('id="provingLine"'), 'prove.html must show the address being proved');
+  assert.ok(!proveHtml.includes('id="previewAddress"'), 'prove.html must not have a preview address input');
+  assert.ok(appJs.includes('readPreviewAddress'), 'app.js must read the proving address from state');
+  assert.ok(appJs.includes('setProvingAddress'), 'app.js must set the proving address on connect or demo load');
   assert.ok(appJs.includes('previewMatchesConnected'), 'app.js must bind signing/publishing to the owning wallet');
   assert.ok(
     appJs.includes('if (!previewMatchesConnected())'),
-    'publish() must refuse to sign when the connected wallet does not own the previewed address',
+    'publish() must refuse to sign when the connected wallet does not own the address being proved',
   );
   // The demo load and the snapshot fetch must not be gated on a wallet.
   assert.ok(!appJs.includes("$('loadDemoBtn').disabled = !connected"), 'demo load must not need a wallet');
   assert.ok(!appJs.includes("$('fetchSnapshotBtn').disabled = !connected"), 'snapshot fetch must not need a wallet');
   // The prover commitment, tripwire and disclosure must use the
-  // previewed address, not the connected wallet. Since P2 the
-  // commitment is salted (fresh salt per report), so the check is for
-  // commitAddress over the previewed address.
-  assert.ok(appJs.includes('commitAddress(state.previewAddress, proverSalt)'), 'prover commitment must hash the previewed address');
-  assert.ok(appJs.includes('buildDisclosurePackage(report, state.previewAddress'), 'disclosure must use the previewed address');
+  // address being proved, not the connected wallet id directly.
+  // Since P2 the commitment is salted (fresh salt per report), so the
+  // check is for commitAddress over the proving address.
+  assert.ok(appJs.includes('commitAddress(state.previewAddress, proverSalt)'), 'prover commitment must hash the address being proved');
+  assert.ok(appJs.includes('buildDisclosurePackage(report, state.previewAddress'), 'disclosure must use the address being proved');
 });
 
 test('app.js keeps private data out of the AI request and the public report', () => {
