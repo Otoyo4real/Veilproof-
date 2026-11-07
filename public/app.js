@@ -247,6 +247,15 @@ function updateWalletUI() {
       '. Switch wallets to sign the challenge for the previewed address, or preview a different address.</p>';
   }
   $('evaluateBtn').disabled = !state.snapshot;
+  // The button is greyed out until step 1 fetches the snapshot, and a
+  // greyed out button with no reason is a dead end. Say plainly what to
+  // do first, so nobody has to guess why it does nothing.
+  const evaluateHint = $('evaluateHint');
+  if (evaluateHint) {
+    evaluateHint.textContent = state.snapshot
+      ? ''
+      : 'Fetch the snapshot in step 1 first. Paste the wallet address, then tap Fetch snapshot, and this button will work.';
+  }
   $('aiBtn').disabled = !state.evaluation;
   $('buildReportBtn').disabled = !state.evaluation;
   refreshPublishBtn();
