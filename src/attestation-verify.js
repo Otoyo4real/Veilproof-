@@ -106,6 +106,7 @@ export const DEFAULT_MAX_EVIDENCE_AGE_MS = 60 * 60 * 1000;
 export const DEFAULT_SIGNATURE_RETRIES = 5;
 export const DEFAULT_SIGNATURE_RETRY_DELAY_MS = 1000;
 export const DEFAULT_SIGNING_ALGO = 'ecdsa';
+export const DEFAULT_PCCS_URL = 'https://pccs.phala.network/sgx/certification/v4/';
 
 // Method strings carried on results, so a consumer can tell which
 // procedure produced the verdict.
@@ -155,7 +156,7 @@ export function resolveAttestationPolicy(env = process.env) {
     requireGpu: String(env.VEILPROOF_ATTESTATION_REQUIRE_GPU ?? 'false').toLowerCase() === 'true',
     pccsUrl: typeof env.VEILPROOF_ATTESTATION_PCCS_URL === 'string' && env.VEILPROOF_ATTESTATION_PCCS_URL.trim() !== ''
       ? env.VEILPROOF_ATTESTATION_PCCS_URL.trim()
-      : undefined,
+      : DEFAULT_PCCS_URL,
     signatureRetries: Math.max(
       1,
       Number(env.VEILPROOF_ATTESTATION_SIGNATURE_RETRIES || DEFAULT_SIGNATURE_RETRIES) || DEFAULT_SIGNATURE_RETRIES,
@@ -392,7 +393,7 @@ export const defaultDcap = {
   verify: (quoteBytes, collateral, nowSecs) => verifyDcapQuote(quoteBytes, collateral, nowSecs),
 };
 
-export async function verifyQuoteDcap(quoteBytes, { dcap = defaultDcap, pccsUrl, nowMs = Date.now() } = {}) {
+export async function verifyQuoteDcap(quoteBytes, { dcap = defaultDcap, pccsUrl = DEFAULT_PCCS_URL, nowMs = Date.now() } = {}) {
   try {
     Quote.parse(quoteBytes);
   } catch (err) {

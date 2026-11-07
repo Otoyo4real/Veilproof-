@@ -245,7 +245,10 @@ const aiSummary = {
   suggestedLimitNear: guarded.suggestedLimitNear,
   confidence: guarded.confidence,
   points: guarded.points,
-  attestation: { verifiable: true, nonceMatched: true, ref: attRef },
+  // Honest status: this script only checks the nonce echo. Full DCAP quote
+  // + response-signature verification runs in api/analyze (see
+  // src/attestation-verify.js); a nonce echo alone is UNVERIFIED there.
+  attestation: { status: 'UNVERIFIED', verifiable: false, nonceMatched: true, ref: attRef },
 };
 console.log(`  PASS — verdict ${guarded.verdict}${guarded.suggestedLimitNear !== null ? `, suggested limit ${guarded.suggestedLimitNear} NEAR` : ''}, confidence ${guarded.confidence}, ${guarded.points.length} points, attestation nonce echoed by ${gwEcho ? 'gateway' : ''}${gwEcho && mdlEcho ? ' + ' : ''}${mdlEcho ? 'model' : ''}, chat ${aiOut.chat_id}`);
 

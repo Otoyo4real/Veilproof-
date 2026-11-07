@@ -34,9 +34,11 @@ import {
   expectedSignatureText,
   resolveAttestationPolicy,
   createNonceStore,
+  verifyQuoteDcap,
   sha256Hex,
   DEFAULT_TCB_ACCEPTED,
   DEFAULT_MAX_EVIDENCE_AGE_MS,
+  DEFAULT_PCCS_URL,
 } from '../src/attestation-verify.js';
 import { buildAttestationFixture, loadAttestationFixture, signText, signEcdsaText } from './attestation-fixture.mjs';
 
@@ -138,6 +140,8 @@ test('resolveAttestationPolicy: defaults match the official SDK policy; env over
   assert.equal(policy.requireSignature, true);
   assert.equal(policy.requireGpu, false);
   assert.equal(policy.measurements, null);
+  assert.equal(policy.pccsUrl, DEFAULT_PCCS_URL);
+  assert.equal(DEFAULT_PCCS_URL, 'https://pccs.phala.network/sgx/certification/v4/');
   const custom = resolveAttestationPolicy({
     VEILPROOF_ATTESTATION_TCB_ACCEPT: 'UpToDate',
     VEILPROOF_ATTESTATION_MAX_AGE_MS: '60000',
@@ -150,6 +154,23 @@ test('resolveAttestationPolicy: defaults match the official SDK policy; env over
     () => resolveAttestationPolicy({ VEILPROOF_ATTESTATION_MEASUREMENTS: 'not json' }),
     /VEILPROOF_ATTESTATION_MEASUREMENTS is invalid/,
   );
+});
+
+test('verifyQuoteDcap: no pccsUrl falls back to the default Phala PCCS URL (never undefined)', async () => {
+  // Regression: passing undefined as the PCCS URL made @phala/dcap-qvl throw
+  // "Cannot read properties of undefined (reading 'replace')" and every live
+  // attestation came back UNVERIFIED on collateral. The default must be the
+  // Phala v4 PCCS URL, and verifyQuoteDcap must use it when no URL is given.
+  let seenUrl = 'not-called';
+  const mockDcap = {
+    getCollateral: async (url) => { seenUrl = url; return { fake: true }; },
+    verify: () => ({ ok: true, status: 'UpToDate', advisoryIds: [] }),
+  };
+  const { evidence } = buildAttestationFixture();
+  const quoteBytes = Buffer.from(evidence.gateway_attestation.intel_quote.replace(/^0x/, ''), 'hex');
+  const result = await verifyQuoteDcap(quoteBytes, { dcap: mockDcap });
+  assert.equal(seenUrl, DEFAULT_PCCS_URL);
+  assert.equal(result.ok, true);
 });
 
 test('createNonceStore: a nonce is seen once, then pruned after its age', () => {
