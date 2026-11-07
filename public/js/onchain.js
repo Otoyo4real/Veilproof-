@@ -102,6 +102,14 @@ function isNotObservedError(err) {
   return rpc?.cause?.name === 'TIMEOUT_ERROR' || rpc?.cause?.info?.cause === 'NOT_OBSERVED' || err?.httpStatus === 408;
 }
 
+// True for the network errors rpcCall throws after every endpoint
+// fails (fetch throwing, HTTP failure, local timeout). RPC-level
+// errors (RpcError) are not network errors: a tx the chain says does
+// not exist is a data answer, not a dropped connection.
+function isNetworkError(err) {
+  return typeof err?.message === 'string' && err.message.includes('network error');
+}
+
 // Canonical JSON: object keys sorted recursively, so the same payload
 // always hashes the same way regardless of key insertion order.
 // (Local copy of the canonicalisation in src/onchain.js; the shared
@@ -391,16 +399,30 @@ export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) 
   const account = await getAccount(accountId);
   const seen = new Set();
   const txs = [];
+  let skippedTxCount = 0;
   for (const entry of txHashes) {
     const hash = typeof entry === 'string' ? entry : entry?.hash;
     const senderId = typeof entry === 'string' ? accountId : entry?.senderId ?? accountId;
     if (typeof hash !== 'string' || seen.has(hash)) continue;
     seen.add(hash);
-    const verified = await verifyTx(hash, senderId);
-    if (verified) txs.push(verified);
+    // One tx failing to verify (e.g. a flaky phone connection dropping
+    // a single RPC call) must not kill the whole snapshot: skip it and
+    // keep the txs that did verify. A skipped tx is simply absent, so
+    // the snapshot can only undercount activity, never invent it.
+    // Other errors (malformed input, RPC-level failures) still throw.
+    try {
+      const verified = await verifyTx(hash, senderId);
+      if (verified) txs.push(verified);
+    } catch (err) {
+      if (isNetworkError(err)) {
+        skippedTxCount += 1;
+        continue;
+      }
+      throw err;
+    }
   }
   txs.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
-  const snapshot = { account, txs, blockHeight: account.blockHeight };
+  const snapshot = { account, txs, blockHeight: account.blockHeight, skippedTxCount };
   if (opts.balanceSamples) {
     const detailed = await sampleBalanceHistoryDetailed(accountId, opts.balanceSamples);
     snapshot.balanceSamples = detailed.samples;

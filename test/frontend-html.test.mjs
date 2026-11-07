@@ -20,6 +20,8 @@ const appJs = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
 // The prover ids live on prove.html; the live demo ids live on demo.html.
 const PROVER_IDS = [
   'provingLine',
+  'proveConnectedBtn',
+  'mismatchOut',
   'connectBtn',
   'walletStatus',
   'accountLine',

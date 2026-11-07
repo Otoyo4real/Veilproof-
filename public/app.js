@@ -280,11 +280,26 @@ function updateWalletUI() {
   $('loadDemoBtn').disabled = false;
   $('fetchSnapshotBtn').disabled = false;
   $('challengeBtn').disabled = !(connected && matches);
-  if (connected && !matches && !state.challenge) {
-    $('challengeOut').innerHTML =
-      '<p class="warn">Connected wallet <span class="mono">' + esc(state.accountId) + '</span> does not own the address being proved' +
-      (state.previewAddress ? ' <span class="mono">' + esc(state.previewAddress) + '</span>' : '') +
-      '. Switch to the wallet that owns it to sign the challenge.</p>';
+  // The wallet is connected but the address being proved is different
+  // (usually the demo was loaded after connecting): offer a one-tap
+  // switch back to the connected wallet, so the user is not stuck
+  // proving the demo when they meant their own wallet.
+  const proveBtn = $('proveConnectedBtn');
+  const mismatchOut = $('mismatchOut');
+  if (connected && !matches) {
+    if (proveBtn) {
+      proveBtn.style.display = '';
+      proveBtn.textContent = `Prove ${state.accountId} instead`;
+    }
+    if (mismatchOut) {
+      mismatchOut.innerHTML =
+        '<p class="warn">Connected wallet <span class="mono">' + esc(state.accountId) + '</span> does not own the address being proved' +
+        (state.previewAddress ? ' <span class="mono">' + esc(state.previewAddress) + '</span>' : '') +
+        '. Tap the button above to switch back to your wallet.</p>';
+    }
+  } else {
+    if (proveBtn) proveBtn.style.display = 'none';
+    if (mismatchOut) mismatchOut.innerHTML = '';
   }
   // Evaluate fetches the snapshot itself when there is none yet, so the
   // button is never greyed out for lack of one. It only needs a wallet
@@ -589,6 +604,11 @@ async function fetchSnapshot() {
       out.innerHTML +=
         '<p class="muted">Ignored ' + ignoredLinkHashes + ' link transfer hash(es) with no matching linked wallet address. ' +
         'Add the linked wallet address above, or clear the hash box.</p>';
+    }
+    if (snapshot.skippedTxCount > 0) {
+      out.innerHTML +=
+        '<p class="muted">' + snapshot.skippedTxCount + ' transaction(s) could not be verified (network) and were skipped. ' +
+        'The snapshot covers the rest; tap Fetch snapshot again to try the missing ones.</p>';
     }
     updateWalletUI();
     saveState();
@@ -1280,6 +1300,15 @@ window.addEventListener('load', async () => {
   handleRedirectResult();
   $('connectBtn').addEventListener('click', connectWallet);
   $('challengeBtn').addEventListener('click', signChallenge);
+  $('proveConnectedBtn').addEventListener('click', () => {
+    // Switch the proving address back to the connected wallet (e.g.
+    // after the demo was loaded). setProvingAddress clears the old
+    // address's inputs and invalidates its snapshot.
+    if (state.accountId) {
+      setProvingAddress(state.accountId);
+      updateWalletUI();
+    }
+  });
   $('loadDemoBtn').addEventListener('click', loadDemoHistory);
   $('fetchSnapshotBtn').addEventListener('click', fetchSnapshot);
   // Save the snapshot inputs as the user types, so a reload never
