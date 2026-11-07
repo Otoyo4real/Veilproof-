@@ -146,14 +146,20 @@ test('agent skill: linked from every page and named in the README', () => {
   // The skill is what lets an agent, including an AI judge, use
   // VeilProof. It is not enough for it to exist at /skill.md: it
   // must be linked from the site and named in the README, or no one
-  // finds it.
+  // finds it. It sits at the top: in the header nav on every page,
+  // and near the top of the README, not buried in the footer or in
+  // the Judge section alone.
   const pages = ['index.html', 'prove.html', 'demo.html', 'verify.html', 'how-it-works.html'];
   for (const page of pages) {
     const html = readFileSync(new URL(`../public/${page}`, import.meta.url), 'utf8');
     assert.ok(html.includes('skill.md'), `${page} must link to the agent skill`);
+    const nav = html.match(/<nav class="site-nav"[\s\S]*?<\/nav>/);
+    assert.ok(nav && nav[0].includes('skill.md'), `${page} must link the skill from its top nav`);
   }
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   assert.ok(readme.includes('skill.md'), 'README must name the agent skill');
+  const top = readme.slice(0, readme.indexOf('## Privacy first'));
+  assert.ok(top.includes('skill.md'), 'README must name the agent skill near the top');
   const skill = readFileSync(new URL('../public/skill.md', import.meta.url), 'utf8');
   assert.ok(skill.includes('For a judge'), 'skill.md must keep its section for a judge');
 });

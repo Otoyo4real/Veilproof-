@@ -8,6 +8,8 @@ The use case is simple. Agents are starting to pay each other: compute, invoices
 
 Live site: https://veilproof22.vercel.app/
 
+Agent skill: https://veilproof22.vercel.app/skill.md — the full prove and verify steps for agents, including AI judges, with the ten checks, the registry methods, and the demo claim as a worked example.
+
 ## Privacy first
 
 Privacy is the point, not a feature. Here is exactly what the public sees, and what it never sees.
