@@ -31,7 +31,6 @@ const PROVER_IDS = [
   'linkedAddresses',
   'linkedTxHashes',
   'sampleWindow',
-  'loadDemoBtn',
   'fetchSnapshotBtn',
   'snapshotOut',
   'polBalance',
@@ -143,22 +142,40 @@ test('no page hardcodes a wallet address', () => {
   }
 });
 
+test('prover flow: signing the challenge fetches the snapshot automatically', () => {
+  // Once the wallet is connected and the challenge is signed, the
+  // snapshot is fetched for that wallet automatically: the user
+  // should not have to tap Fetch snapshot by hand, and the snapshot
+  // is always for the wallet they just signed.
+  const signStart = appJs.indexOf('async function signChallenge');
+  assert.ok(signStart >= 0, 'app.js must define signChallenge');
+  const signEnd = appJs.indexOf('async function fetchSnapshot', signStart);
+  const signBody = appJs.slice(signStart, signEnd >= 0 ? signEnd : undefined);
+  assert.ok(signBody.includes('await fetchSnapshot()'), 'signChallenge must fetch the snapshot after signing');
+  // Sustained and time-weighted claims need balance samples. If the
+  // policy asks for them but the snapshot has none, Evaluate turns
+  // sampling on (24 hours) and re-fetches instead of failing with
+  // the claims-engine error about missing balanceSamples.
+  assert.ok(appJs.includes("$('sampleWindow').value = '24'"), 'evaluate must turn sampling on when the policy needs samples');
+  assert.ok(appJs.includes('Those claims need balance history sampling'), 'evaluate must say why it is re-fetching');
+});
+
 test('prover flow: connect wallet sets the address, no address to type', () => {
   // The wallet you connect IS the wallet you prove: there is no
-  // address field to type. The demo load sets the demo account
-  // instead, for trying without a wallet. Ownership is proved only
-  // by the connected wallet that owns the address being proved.
+  // address field to type, and no demo to load. Ownership is proved
+  // only by the connected wallet that owns the address being proved.
   assert.ok(proveHtml.includes('id="provingLine"'), 'prove.html must show the address being proved');
   assert.ok(!proveHtml.includes('id="previewAddress"'), 'prove.html must not have a preview address input');
+  assert.ok(!proveHtml.includes('id="loadDemoBtn"'), 'prove.html must not offer a demo to load');
   assert.ok(appJs.includes('readPreviewAddress'), 'app.js must read the proving address from state');
-  assert.ok(appJs.includes('setProvingAddress'), 'app.js must set the proving address on connect or demo load');
+  assert.ok(appJs.includes('setProvingAddress'), 'app.js must set the proving address on connect');
   assert.ok(appJs.includes('previewMatchesConnected'), 'app.js must bind signing/publishing to the owning wallet');
   assert.ok(
     appJs.includes('if (!previewMatchesConnected())'),
     'publish() must refuse to sign when the connected wallet does not own the address being proved',
   );
-  // The demo load and the snapshot fetch must not be gated on a wallet.
-  assert.ok(!appJs.includes("$('loadDemoBtn').disabled = !connected"), 'demo load must not need a wallet');
+  // The snapshot fetch button is never greyed out; clicking it
+  // without a wallet says to connect one.
   assert.ok(!appJs.includes("$('fetchSnapshotBtn').disabled = !connected"), 'snapshot fetch must not need a wallet');
   // The prover commitment, tripwire and disclosure must use the
   // address being proved, not the connected wallet id directly.

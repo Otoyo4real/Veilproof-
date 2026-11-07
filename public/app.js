@@ -1,11 +1,10 @@
 // VeilProof prover app — runs entirely in the prover's browser.
 //
 // Flow: connect the wallet to prove (its address is the wallet in
-// the report, nothing to type) or load the demo history to try
-// without a wallet -> optional ownership challenge -> fetch onchain
-// snapshot -> choose policy -> evaluate claims -> choose what to
-// disclose -> optional NEAR AI analysis -> build report -> publish
-// the three hashes onchain.
+// the report, nothing to type) -> optional ownership challenge ->
+// fetch onchain snapshot -> choose policy -> evaluate claims ->
+// choose what to disclose -> optional NEAR AI analysis -> build
+// report -> publish the three hashes onchain.
 //
 // Reading is read-only: anyone can read any wallet's onchain data,
 // so fetching a snapshot proves nothing about who you are. Ownership
@@ -162,20 +161,19 @@ function loadState() {
   }
 }
 
-// The address being proved. It is set by connecting a wallet (step 1)
-// or by loading the demo history, never typed. A new address means a
-// new snapshot: everything downstream was about the old address and
-// must go, so a stale report can never be published under a new one.
+// The address being proved. It is set by connecting a wallet (step 1),
+// never typed. A new address means a new snapshot: everything
+// downstream was about the old address and must go, so a stale report
+// can never be published under a new one.
 function setProvingAddress(next) {
   const address = (next || '').trim().toLowerCase() || null;
   const changed = state.previewAddress !== address;
   if (changed) {
     // The snapshot inputs belong to the old address: its tx hashes,
     // linked wallets and link hashes are meaningless for the new one,
-    // so clear them. Otherwise a demo's hashes would pollute the next
-    // wallet's snapshot, and a stale link hash would block the fetch.
-    // (loadDemoHistory fills the tx box again after this, with the
-    // demo's own hashes.)
+    // so clear them. Otherwise the old address's hashes would pollute
+    // the new wallet's snapshot, and a stale link hash would block
+    // the fetch.
     for (const id of ['txHashes', 'linkedAddresses', 'linkedTxHashes']) {
       const el = $(id);
       if (el) el.value = '';
@@ -198,12 +196,12 @@ function setProvingAddress(next) {
   saveState();
 }
 
-// The address being proved comes from the connected wallet (step 1)
-// or the demo history, never from a typed field. There is no preview
-// address to type: the wallet you connect IS the wallet you prove.
+// The address being proved comes from the connected wallet (step 1),
+// never from a typed field. There is no preview address to type: the
+// wallet you connect IS the wallet you prove.
 function readPreviewAddress() {
   if (state.previewAddress) return state.previewAddress;
-  throw new Error('Connect your wallet, or load the demo history, first.');
+  throw new Error('Connect your wallet first.');
 }
 
 // True only when the connected wallet is the wallet that owns the
@@ -269,21 +267,20 @@ function updateWalletUI() {
   if (proving) {
     proving.textContent = state.previewAddress
       ? `Proving: ${state.previewAddress}`
-      : 'No wallet set yet. Connect your wallet, or load the demo history, to set the wallet being proved.';
+      : 'No wallet set yet. Connect your wallet to set the wallet being proved.';
   }
   const connected = Boolean(state.accountId);
   const matches = previewMatchesConnected();
-  // The snapshot fetch and the claims work before any wallet is
-  // connected: the chain is public, and the demo history sets the
-  // address. Only the steps that prove ownership need the wallet,
-  // and they need the wallet that OWNS the address being proved.
-  $('loadDemoBtn').disabled = false;
+  // The snapshot fetch and the claims need a wallet connected: the
+  // connected wallet is the address being proved. Only the steps that
+  // prove ownership need the wallet that OWNS that address, and the
+  // challenge and publish steps check that binding.
   $('fetchSnapshotBtn').disabled = false;
   $('challengeBtn').disabled = !(connected && matches);
   // The wallet is connected but the address being proved is different
-  // (usually the demo was loaded after connecting): offer a one-tap
-  // switch back to the connected wallet, so the user is not stuck
-  // proving the demo when they meant their own wallet.
+  // (it was set to another wallet before): offer a one-tap switch
+  // back to the connected wallet, so the user is not stuck proving
+  // the wrong wallet.
   const proveBtn = $('proveConnectedBtn');
   const mismatchOut = $('mismatchOut');
   if (connected && !matches) {
@@ -303,7 +300,7 @@ function updateWalletUI() {
   }
   // Evaluate fetches the snapshot itself when there is none yet, so the
   // button is never greyed out for lack of one. It only needs a wallet
-  // set (connected wallet or demo) and at least one policy field set.
+  // set (connected wallet) and at least one policy field set.
   $('evaluateBtn').disabled = false;
   const evaluateHint = $('evaluateHint');
   if (evaluateHint) {
@@ -455,6 +452,11 @@ async function signChallenge() {
       '<p class="muted">Full cryptographic verification of the NEP 413 payload is not done here, ' +
       'the publish transaction in step 4 is the binding proof onchain (the registry records the signer as the claim owner).</p>';
     saveState();
+    // The wallet is connected and the challenge is signed, so fetch
+    // its snapshot now. The user should not have to tap Fetch
+    // snapshot by hand, and the snapshot is always for the wallet
+    // they just signed, never the demo.
+    await fetchSnapshot();
   } catch (err) {
     out.innerHTML =
       '<p class="error">Challenge signing failed: ' + esc(err.message) + '</p>' +
@@ -477,26 +479,6 @@ function parseTxLines() {
     else throw new Error(`bad tx line (expected "hash" or "hash,senderId"): ${line}`);
   }
   return entries;
-}
-
-async function loadDemoHistory() {
-  try {
-    const res = await fetch('./demo-history.json');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const history = await res.json();
-    // No wallet needed: the demo history is public testnet data. The
-    // demo account becomes the address being proved, so the snapshot
-    // is one click.
-    setProvingAddress(history.accountId);
-    $('txHashes').value = history.transfers.map((t) => `${t.hash},${t.senderId}`).join('\n');
-    $('snapshotOut').innerHTML =
-      '<p class="ok">Demo history loaded: ' + history.transfers.length + ' transfers for <span class="mono">' +
-      esc(history.accountId) + '</span>. Press "Fetch snapshot" to verify them onchain, no wallet needed.</p>';
-    updateWalletUI();
-    saveState();
-  } catch (err) {
-    $('snapshotOut').innerHTML = '<p class="error">Could not load the demo history: ' + esc(err.message) + '</p>';
-  }
 }
 
 function parseLinkedAddresses() {
@@ -831,6 +813,26 @@ async function evaluate() {
     }
     const policy = readPolicy();
     if (Object.keys(policy).length === 0) throw new Error('Set at least one policy field.');
+    // Sustained and time-weighted claims need balance samples. If the
+    // policy asks for them but the snapshot has none (sampling was
+    // off), turn sampling on (24 hours) and re-fetch instead of
+    // failing: the user filled those fields in, so they want those
+    // claims, and the error about missing samples tells them nothing
+    // useful about how to get them.
+    const needsSamples =
+      policy.sustainedBalanceAtLeastYocto !== undefined || policy.timeWeightedBalanceAtLeastYocto !== undefined;
+    const wallets = [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)];
+    const missingSamples =
+      needsSamples && wallets.some((w) => !Array.isArray(w.balanceSamples) || w.balanceSamples.length === 0);
+    if (missingSamples) {
+      $('claimsOut').innerHTML =
+        '<p class="muted">Those claims need balance history sampling, turning it on (24 hours) and re-fetching the snapshot…</p>';
+      $('sampleWindow').value = '24';
+      const snapshotError = await fetchSnapshot();
+      if (!state.snapshot) {
+        throw new Error(snapshotError ? `Snapshot failed: ${snapshotError}` : 'Fetch a snapshot first.');
+      }
+    }
     const nowNs = (BigInt(Date.now()) * 1000000n).toString();
     state.policy = policy;
     const bundle = { wallets: [state.snapshot, ...state.linkedWallets.map((w) => w.snapshot)] };
@@ -1000,7 +1002,7 @@ async function buildReportAndHashes() {
   const out = $('reportOut');
   try {
     if (!state.evaluation || !state.snapshot) throw new Error('Evaluate the claims first.');
-    if (!state.previewAddress) throw new Error('Connect your wallet, or load the demo history, first.');
+    if (!state.previewAddress) throw new Error('Connect your wallet first.');
     const disclosed = Array.from(document.querySelectorAll('#discloseList input[type="checkbox"]:checked')).map(
       (box) => box.dataset.claim,
     );
@@ -1302,14 +1304,13 @@ window.addEventListener('load', async () => {
   $('challengeBtn').addEventListener('click', signChallenge);
   $('proveConnectedBtn').addEventListener('click', () => {
     // Switch the proving address back to the connected wallet (e.g.
-    // after the demo was loaded). setProvingAddress clears the old
-    // address's inputs and invalidates its snapshot.
+    // it was set to another wallet before). setProvingAddress clears
+    // the old address's inputs and invalidates its snapshot.
     if (state.accountId) {
       setProvingAddress(state.accountId);
       updateWalletUI();
     }
   });
-  $('loadDemoBtn').addEventListener('click', loadDemoHistory);
   $('fetchSnapshotBtn').addEventListener('click', fetchSnapshot);
   // Save the snapshot inputs as the user types, so a reload never
   // loses them and the fields cannot disagree with the saved state.
@@ -1346,7 +1347,7 @@ window.addEventListener('load', async () => {
     if (id && !state.accountId) {
       state.accountId = id;
       // Only make the restored wallet the proving address when nothing
-      // is being proved yet, so a saved demo session is not wiped by a
+      // is being proved yet, so a saved session is not wiped by a
       // stale wallet session on reload.
       if (!state.previewAddress) setProvingAddress(id);
       updateWalletUI();

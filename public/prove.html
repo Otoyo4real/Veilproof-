@@ -48,7 +48,8 @@
     the report, you never type it. The chain is read, never written to,
     until you choose to publish. Sign the short ownership challenge so a
     lender trusts the report, only the owner of the key could have made
-    it. Publishing in step 4 is a transaction from the same wallet.</p>
+    it. Once you sign, your wallet snapshot is fetched automatically.
+    Publishing in step 4 is a transaction from the same wallet.</p>
     <p><button id="connectBtn" type="button">Connect wallet</button></p>
     <p id="walletStatus" class="muted">Not connected. Meteor and MyNearWallet are supported.</p>
     <p id="accountLine" class="mono"></p>
@@ -57,9 +58,6 @@
     <div id="mismatchOut"></div>
     <p><button id="challengeBtn" type="button" disabled>Sign ownership challenge</button></p>
     <div id="challengeOut"></div>
-    <p class="muted">No wallet? Try the demo instead, it sets the demo wallet
-    as the wallet being proved, no wallet needed.</p>
-    <p><button id="loadDemoBtn" type="button">Load demo history</button></p>
   </section>
 
   <section class="card" id="step-2">
