@@ -168,6 +168,20 @@ function loadState() {
 // must go, so a stale report can never be published under a new one.
 function setProvingAddress(next) {
   const address = (next || '').trim().toLowerCase() || null;
+  const changed = state.previewAddress !== address;
+  if (changed) {
+    // The snapshot inputs belong to the old address: its tx hashes,
+    // linked wallets and link hashes are meaningless for the new one,
+    // so clear them. Otherwise a demo's hashes would pollute the next
+    // wallet's snapshot, and a stale link hash would block the fetch.
+    // (loadDemoHistory fills the tx box again after this, with the
+    // demo's own hashes.)
+    for (const id of ['txHashes', 'linkedAddresses', 'linkedTxHashes']) {
+      const el = $(id);
+      if (el) el.value = '';
+    }
+    state.linkedWallets = [];
+  }
   if (state.snapshot && state.snapshot.account.accountId !== address) {
     state.snapshot = null;
     state.policy = null;

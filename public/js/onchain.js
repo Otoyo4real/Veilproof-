@@ -25,6 +25,15 @@ import { describeSampling } from './sampling.js';
 
 export const NEAR_TESTNET_RPC = 'https://rpc.testnet.near.org';
 
+// Fallback testnet RPC endpoints, tried in order when the primary
+// cannot be reached. Some networks block or fail one node and not the
+// other; a call that fails on every endpoint is a network problem on
+// the user's side, not a data problem.
+const NEAR_TESTNET_RPCS = [
+  NEAR_TESTNET_RPC,
+  'https://archival-rpc.testnet.near.org',
+];
+
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{43,44}$/;
 
 class RpcError extends Error {
@@ -35,48 +44,52 @@ class RpcError extends Error {
   }
 }
 
-// One JSON-RPC call. Retries ONCE on network errors only (fetch throwing,
-// HTTP failure, local timeout). RPC-level errors are thrown immediately.
+// One JSON-RPC call. Retries ONCE per endpoint on network errors only
+// (fetch throwing, HTTP failure, local timeout), then tries the next
+// endpoint. RPC-level errors are thrown immediately.
 async function rpcCall(method, params, { timeoutMs = 30000, retries = 1 } = {}) {
   let lastError;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(NEAR_TESTNET_RPC, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: `${method}-${Date.now()}-${attempt}`, method, params }),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      // HTTP 408 from the tx-lookup endpoints is the node's lookup timeout
-      // in HTTP form (the same condition the JSON API reports as
-      // TIMEOUT_ERROR / NOT_OBSERVED). It is surfaced with its status so
-      // verifyTx can classify it as "not observed" instead of retrying it
-      // as a network error. Other HTTP failures are network errors.
-      if (!res.ok) {
-        const err = new Error(`NEAR RPC HTTP ${res.status} on ${method}`);
-        err.httpStatus = res.status;
-        throw err;
+  for (const rpcUrl of NEAR_TESTNET_RPCS) {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: `${method}-${Date.now()}-${attempt}`, method, params }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        // HTTP 408 from the tx-lookup endpoints is the node's lookup timeout
+        // in HTTP form (the same condition the JSON API reports as
+        // TIMEOUT_ERROR / NOT_OBSERVED). It is surfaced with its status so
+        // verifyTx can classify it as "not observed" instead of retrying it
+        // as a network error. Other HTTP failures are network errors.
+        if (!res.ok) {
+          const err = new Error(`NEAR RPC HTTP ${res.status} on ${method}`);
+          err.httpStatus = res.status;
+          throw err;
+        }
+        const json = await res.json();
+        if (json.error) {
+          throw new RpcError(`NEAR RPC ${method} failed: ${json.error.message || json.error.name || 'unknown error'}`, json.error);
+        }
+        return json.result;
+      } catch (err) {
+        clearTimeout(timer);
+        if (err instanceof RpcError) throw err;
+        // An HTTP 408 is a lookup timeout, not a transient blip: retrying
+        // it just burns another timeout. Surface it for classification.
+        if (err.httpStatus === 408) throw err;
+        lastError = err;
+        if (attempt < retries) continue;
+        // This endpoint is unreachable; try the next one.
+        break;
       }
-      const json = await res.json();
-      if (json.error) {
-        throw new RpcError(`NEAR RPC ${method} failed: ${json.error.message || json.error.name || 'unknown error'}`, json.error);
-      }
-      return json.result;
-    } catch (err) {
-      clearTimeout(timer);
-      if (err instanceof RpcError) throw err;
-      // An HTTP 408 is a lookup timeout, not a transient blip: retrying
-      // it just burns another timeout. Surface it for classification.
-      if (err.httpStatus === 408) throw err;
-      lastError = err;
-      if (attempt < retries) continue;
-      throw new Error(`NEAR RPC ${method} network error: ${err.message}`);
     }
   }
-  throw lastError;
+  throw new Error(`NEAR RPC ${method} network error: ${lastError ? lastError.message : 'unreachable'}. Check your connection and try again.`);
 }
 
 // True when the RPC says "this transaction was never observed".
