@@ -142,6 +142,19 @@ test('no page hardcodes a wallet address', () => {
   }
 });
 
+test('prover flow: a minimum without a window defaults to 30 days', () => {
+  // The window fields show 30 as a placeholder, not a value. A user
+  // who fills in a minimum and leaves the window blank used to get
+  // "needs its window" and get stuck. readPolicy now defaults the
+  // window to 30 and writes it back into the field, for all four
+  // minimum-plus-window pairs.
+  assert.ok(!appJs.includes('needs its window'), 'app.js must not fail on a missing window');
+  assert.ok(appJs.includes("txWindow = '30'"), 'readPolicy must default the tx window to 30');
+  assert.ok(appJs.includes("volWindow = '30'"), 'readPolicy must default the volume window to 30');
+  assert.ok(appJs.includes("aggTxWindow = '30'"), 'readPolicy must default the aggregate tx window to 30');
+  assert.ok(appJs.includes("aggVolWindow = '30'"), 'readPolicy must default the aggregate volume window to 30');
+});
+
 test('prover flow: signing the challenge fetches the snapshot automatically', () => {
   // Once the wallet is connected and the challenge is signed, the
   // snapshot is fetched for that wallet automatically: the user

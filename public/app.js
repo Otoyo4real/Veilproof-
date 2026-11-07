@@ -696,19 +696,29 @@ function readPolicy() {
   const staked = $('polStaked').value.trim();
   if (staked) policy.stakedAtLeastYocto = nearToYocto(staked);
   const minTx = $('polMinTx').value.trim();
-  const txWindow = $('polTxWindow').value.trim();
+  let txWindow = $('polTxWindow').value.trim();
   if (minTx) {
     if (!/^\d+$/.test(minTx)) throw new Error('Minimum tx count must be a whole number.');
-    if (!txWindow) throw new Error('A minimum tx count needs its window (days).');
+    if (!txWindow) {
+      // A minimum without a window means the standard 30 days: the
+      // user filled in the amount and left the window blank (the 30
+      // shown is only a placeholder, not a value), so use 30 instead
+      // of failing on a window they never typed.
+      txWindow = '30';
+      $('polTxWindow').value = txWindow;
+    }
     policy.minTxCount = minTx;
     policy.txWindowDays = Number(txWindow);
   } else if (txWindow) {
     policy.txWindowDays = Number(txWindow);
   }
   const minVol = $('polMinVol').value.trim();
-  const volWindow = $('polVolWindow').value.trim();
+  let volWindow = $('polVolWindow').value.trim();
   if (minVol) {
-    if (!volWindow) throw new Error('A minimum volume needs its window (days).');
+    if (!volWindow) {
+      volWindow = '30';
+      $('polVolWindow').value = volWindow;
+    }
     policy.minVolumeYocto = nearToYocto(minVol);
     policy.volumeWindowDays = Number(volWindow);
   } else if (volWindow) {
@@ -722,19 +732,25 @@ function readPolicy() {
   const aggBalance = $('polAggBalance').value.trim();
   if (aggBalance) policy.aggregateBalanceAtLeastYocto = nearToYocto(aggBalance);
   const aggMinTx = $('polAggMinTx').value.trim();
-  const aggTxWindow = $('polAggTxWindow').value.trim();
+  let aggTxWindow = $('polAggTxWindow').value.trim();
   if (aggMinTx) {
     if (!/^\d+$/.test(aggMinTx)) throw new Error('Aggregate minimum tx count must be a whole number.');
-    if (!aggTxWindow) throw new Error('An aggregate minimum tx count needs its window (days).');
+    if (!aggTxWindow) {
+      aggTxWindow = '30';
+      $('polAggTxWindow').value = aggTxWindow;
+    }
     policy.aggregateMinTxCount = aggMinTx;
     policy.aggregateTxWindowDays = Number(aggTxWindow);
   } else if (aggTxWindow) {
     policy.aggregateTxWindowDays = Number(aggTxWindow);
   }
   const aggMinVol = $('polAggMinVol').value.trim();
-  const aggVolWindow = $('polAggVolWindow').value.trim();
+  let aggVolWindow = $('polAggVolWindow').value.trim();
   if (aggMinVol) {
-    if (!aggVolWindow) throw new Error('An aggregate minimum volume needs its window (days).');
+    if (!aggVolWindow) {
+      aggVolWindow = '30';
+      $('polAggVolWindow').value = aggVolWindow;
+    }
     policy.aggregateMinVolumeYocto = nearToYocto(aggMinVol);
     policy.aggregateVolumeWindowDays = Number(aggVolWindow);
   } else if (aggVolWindow) {
