@@ -540,8 +540,13 @@ async function fetchSnapshot() {
     renderSnapshot(snapshot, address, entries.length, sampleHours);
     updateWalletUI();
     saveState();
+    return null;
   } catch (err) {
     out.innerHTML = '<p class="error">Snapshot failed: ' + esc(err.message) + '</p>';
+    // Return the reason so a caller (e.g. Evaluate claims, which fetches
+    // the snapshot itself) can show the real error instead of a generic
+    // "fetch a snapshot first". The button handler ignores the return.
+    return err.message;
   }
 }
 
@@ -745,8 +750,12 @@ async function evaluate() {
       // auto-detected, then evaluate. There is no step that must be
       // done first beyond having an address to preview.
       $('claimsOut').innerHTML = '<p class="muted">No snapshot yet, fetching it first…</p>';
-      await fetchSnapshot();
-      if (!state.snapshot) throw new Error('Fetch a snapshot first.');
+      const snapshotError = await fetchSnapshot();
+      if (!state.snapshot) {
+        // Show the real reason the snapshot failed (e.g. no address
+        // entered), not a generic "fetch a snapshot first" that hides it.
+        throw new Error(snapshotError ? `Snapshot failed: ${snapshotError}` : 'Fetch a snapshot first.');
+      }
     }
     const policy = readPolicy();
     if (Object.keys(policy).length === 0) throw new Error('Set at least one policy field.');
