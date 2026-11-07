@@ -358,7 +358,11 @@ async function signChallenge() {
       `Time: ${new Date().toISOString()}`,
     ].join('\n');
     out.innerHTML = '<p class="muted">Waiting for the wallet to sign…</p>';
-    const result = await nw.signMessage({ message, recipient: REGISTRY, nonce });
+    // The wallet expects the nonce as raw 32 bytes, not the base64 string:
+    // passing the base64 string makes Meteor reject the request with
+    // "Expected nonce to be a 32 bytes buffer". The base64 form is kept
+    // in the stored challenge record, where the verifier decodes it.
+    const result = await nw.signMessage({ message, recipient: REGISTRY, nonce: nonceBytes });
     // The exact return shape varies by wallet; extract defensively and
     // show the raw result so nothing is hidden.
     const signature = result?.signature ?? result?.signedMessage?.signature ?? null;
@@ -570,7 +574,11 @@ async function signLink(index) {
     const nonce = btoa(bin);
     const message = buildLinkMessage(entry.address, state.previewAddress);
     setOut('<span class="muted">Waiting for the wallet to sign… (switch to ' + esc(entry.address) + ' in your wallet app first.)</span>');
-    const result = await nw.signMessage({ message, recipient: REGISTRY, nonce });
+    // The wallet expects the nonce as raw 32 bytes, not the base64 string:
+    // passing the base64 string makes Meteor reject the request with
+    // "Expected nonce to be a 32 bytes buffer". The base64 form is kept
+    // in the stored link signature, where the verifier decodes it.
+    const result = await nw.signMessage({ message, recipient: REGISTRY, nonce: nonceBytes });
     const signature = result?.signature ?? result?.signedMessage?.signature ?? null;
     const publicKey = result?.publicKey ?? result?.signedMessage?.publicKey ?? null;
     if (!signature || !publicKey) {
