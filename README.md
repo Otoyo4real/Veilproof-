@@ -1,12 +1,33 @@
 # VeilProof
 
-Prove an AI agent can pay, without revealing its wallet. VeilProof proves it, and a privacy audit measures how well it stays hidden.
+Privacy is the point. A wallet address is not just a number. Anyone who sees it sees every balance, every transfer, every counterparty. Publishing a treasury wallet to prove you can pay invites targeting, scams and front running, so most agents simply cannot prove it at all.
+
+VeilProof changes that. It proves an agent can pay without ever revealing its wallet. The public sees only hashes and claims, never the address, never an exact balance. The exact figures go only to the verifier the agent chose, in a private package, and a fresh random salt per report means two reports from the same treasury cannot be linked.
+
+The use case is simple. Agents are starting to pay each other: compute, invoices, OTC deals. Before a deal, the other side wants proof the agent can pay. VeilProof is the proof layer for that deal. An agent proves its treasury across every wallet it holds, proves the balance was HELD and not just deposited an hour ago, and carries a portable credit score any app can recompute from the same public rules, while the wallet itself stays private.
 
 Live site: https://veilproof22.vercel.app/
 
-## Security remediation (2026-11-06)
+## Privacy first
 
-This repo was audited against a security, privacy and verification remediation spec and the confirmed findings were fixed in code. The audit confirmed six real issues: the registry exposed the treasury wallet as a public owner, the AI attestation was a nonce echo rather than cryptographic verification, the sampling could not prove continuous possession, the score had no manipulation detection, the contract had open publish and no caps, and the UI showed a single VALID badge instead of separate verification fields. All six are addressed in this repo. The Rust contract v2 is implemented and tested (43/43) but **not yet deployed**; the live registry is still v1 and the migration is a separate decision (see [docs/contract-migration.md](docs/contract-migration.md)). The frontend, backend, attestation, sampling and scoring changes go live when this branch is pushed and Vercel deploys it.
+Privacy is the point, not a feature. Here is exactly what the public sees, and what it never sees.
+
+- **The address never goes public.** Only a hash commitment of the wallet is ever published. The address itself travels only in a private disclosure package to the verifier the prover chose, and only because the prover shared it with them. In the v2 contract the treasury never appears onchain at all; the publisher is a dedicated account and the controller is named only as a salted commitment.
+- **Exact values stay sealed.** The public report carries thresholds and a score band only, never an exact balance. The exact figures are sealed for the verifier alone, and a tampered report fails verification.
+- **Reports cannot be linked.** A fresh random salt per report means two reports from the same treasury share no identifier. The public cannot tell they came from the same wallet.
+- **Measured, not promised.** The privacy audit runs an attacker with only public data against 50 simulated provers. It recovered 0 of 50 addresses, and its balance guesses were off by 94.04 percent. Run it yourself: `npm run audit`.
+
+One honest limit: the privacy is from the public, not from the verifier the prover chose. They must see the address to recheck the chain, so the prover shares it with them and no one else. The full trade off is in the section below.
+
+## The idea
+
+VeilProof proves an agent can pay, across every wallet it holds, without revealing the wallet:
+
+- **Multi wallet aggregation.** An agent's treasury is usually spread across wallets. Link them all; balances, volume and activity are aggregated across every linked wallet (a transfer between two of your own wallets is counted once). Each linked wallet proves ownership with a small transfer to the primary wallet, or by signing a link message with its key (NEP 413, no transfer, no gas), either way, only its key holder could have signed it.
+- **Time weighted reputation.** A snapshot balance proves nothing, anyone can flash a deposit an hour before the report. VeilProof samples the balance at past block heights, so it proves the LOWEST balance held over the window and the average balance, not a momentary peak.
+- **A portable credit score (score v2).** A deterministic 0 to 1000 score from onchain facts only: sustained balance (350), time weighted balance (150), external activity and week spread (150), counterparty diversity (100), external volume (100), no failed transactions (100), staking (50). Activity and volume count external transactions only, wash transfers between the prover's own wallets earn nothing, so a prover washing funds between their own wallets scores 600, not 920. The rules are published in [docs/score-v2.md](docs/score-v2.md) (v1 rules stay in [docs/score-v1.md](docs/score-v1.md) for old reports), and the verifier recomputes the exact score from the same snapshots under the report's own version, a tampered score fails verification. Any app holding the disclosure package can recompute it too, so the score is reusable across apps: one report, many verifiers.
+- **An AI underwriter, not an AI verifier.** NEAR AI Cloud (TEE, attested) reads the deterministic score and the claim facts and gives an advisory verdict, lend, lend with limits (with a suggested limit in NEAR), or decline. The verdict is advisory by design: it never changes a report's validity, and a deterministic guard turns any 'lend' on a thin score (< 300) into a 'decline'. The score is the verifiable fact; the AI's judgment is the opinion on top of it.
+- **Private by construction.** The data lives on the chain, so it is genuine by definition. A chosen verifier checks the chain directly. The public sees only a report hash on NEAR and salted hash commitments of the addresses, a fresh random salt per report, carried only in the private disclosure package, so two reports from the same treasury cannot be matched from public data, never the addresses, never the amounts, never the transaction hashes.
 
 ## Run it yourself
 
@@ -20,15 +41,9 @@ npm install && npm test && npm run audit && npm run demo
 - `npm run audit` runs the privacy audit: an attacker with only public data tries to recover a wallet address, link two reports to the same prover, and estimate the exact balance or score, then prints the results table.
 - `npm run demo` builds a report from the committed demo history and verifies all 10 checks locally, no wallet or key needed.
 
-## The idea
+## Security remediation and registry v2
 
-Agents are starting to pay each other: compute, invoices, OTC deals. Before a deal, the other side wants proof the agent can pay, but publishing a treasury wallet invites targeting, scams and front running. VeilProof is the proof layer for that deal:
-
-- **Multi wallet aggregation.** An agent's treasury is usually spread across wallets. Link them all; balances, volume and activity are aggregated across every linked wallet (a transfer between two of your own wallets is counted once). Each linked wallet proves ownership with a small transfer to the primary wallet, or by signing a link message with its key (NEP 413, no transfer, no gas), either way, only its key holder could have signed it.
-- **Time weighted reputation.** A snapshot balance proves nothing, anyone can flash a deposit an hour before the report. VeilProof samples the balance at past block heights, so it proves the LOWEST balance held over the window and the average balance, not a momentary peak.
-- **A portable credit score (score v2).** A deterministic 0 to 1000 score from onchain facts only: sustained balance (350), time weighted balance (150), external activity and week spread (150), counterparty diversity (100), external volume (100), no failed transactions (100), staking (50). Activity and volume count external transactions only, wash transfers between the prover's own wallets earn nothing, so a prover washing funds between their own wallets scores 600, not 920. The rules are published in [docs/score-v2.md](docs/score-v2.md) (v1 rules stay in [docs/score-v1.md](docs/score-v1.md) for old reports), and the verifier recomputes the exact score from the same snapshots under the report's own version, a tampered score fails verification. Any app holding the disclosure package can recompute it too, so the score is reusable across apps: one report, many verifiers.
-- **An AI underwriter, not an AI verifier.** NEAR AI Cloud (TEE, attested) reads the deterministic score and the claim facts and gives an advisory verdict, lend, lend with limits (with a suggested limit in NEAR), or decline. The verdict is advisory by design: it never changes a report's validity, and a deterministic guard turns any 'lend' on a thin score (< 300) into a 'decline'. The score is the verifiable fact; the AI's judgment is the opinion on top of it.
-- **Private by construction.** The data lives on the chain, so it is genuine by definition. A chosen verifier checks the chain directly. The public sees only a report hash on NEAR and salted hash commitments of the addresses, a fresh random salt per report, carried only in the private disclosure package, so two reports from the same treasury cannot be matched from public data, never the addresses, never the amounts, never the transaction hashes.
+This repo was audited against a security, privacy and verification remediation spec and the confirmed findings were fixed in code. The audit confirmed six real issues: the registry exposed the treasury wallet as a public owner, the AI attestation was a nonce echo rather than cryptographic verification, the sampling could not prove continuous possession, the score had no manipulation detection, the contract had open publish and no caps, and the UI showed a single VALID badge instead of separate verification fields. All six are addressed in this repo. The Rust contract v2 is implemented and tested (43/43), deployed, and migrated on 2026-11-07: the live registry is now v2, the treasury never appears onchain, and publishing is restricted to an authorized publisher allowlist. See [docs/contract-migration.md](docs/contract-migration.md).
 
 ## What this proves, and what it does not
 
@@ -82,19 +97,19 @@ VeilProof assumes an adversary who can read all public data (the chain, the regi
 | Attack | Defence | Residual risk |
 | --- | --- | --- |
 | Recover the treasury address from the public report | Fresh random salt per report; only a salted hash commitment is published; exact values are sealed in the disclosure package. | None from the report alone (audit: 0/50 recoveries). |
-| Link two reports to the same prover | Fresh salt per report; commitments are singletons. | The v1 registry's public owner field still links claims from the same publisher (100% precision). Fixed in contract v2 (not yet deployed). Public transaction senders and history remain correlatable. |
+| Link two reports to the same prover | Fresh salt per report; commitments are singletons. | Fixed in contract v2, live since 2026-11-07. Legacy claims remain linkable from v1 history; public transaction senders and history remain correlatable. |
 | Estimate the exact balance or score | Public report carries thresholds and a score band only; exact values are in the disclosure package. | Audit: balance error 94.04%, score error 6.22% from public data alone. |
 | Forge or tamper with a report | SHA 256 report hash anchored on NEAR; the verifier recomputes it and the claims. | None if the verifier rechecks; a verifier who skips the recheck trusts nothing. |
 | Flash funds to fake a balance | Balance is sampled at past block heights; the score uses the lowest sampled balance and the time weighted balance. | Samples are point in time; funds moved between samples are not caught. See the sampling limitation. |
 | Wash trade between own wallets | External only scoring; internal transfers earn nothing; manipulation detection flags circular flows, chains, shared funders, concentrated counterparties and repeated transfers. | No onchain data proves who runs an account; sock puppets are flagged as UNKNOWN, not proven independent. |
 | Forge the AI attestation | The TDX quote is verified with a DCAP verifier, the nonce and signing identity are read from the verified quote, and the response signature is matched to the exact bytes. | No complete end to end chain from model execution through the gateway to the final bytes, and a matching signer does not prove the same serving instance. Documented in [docs/attestation-verification.md](docs/attestation-verification.md). |
-| Publish a claim for someone else's report | Claim IDs are unique; a duplicate publish is rejected. | Anyone can publish any unused claim ID (v1). Contract v2 adds an authorized publisher allowlist. |
+| Publish a claim for someone else's report | Claim IDs are unique; a duplicate publish is rejected. | Contract v2 restricts publishing to an authorized publisher allowlist, live since 2026-11-07. |
 | Revoke someone else's claim | Revocation is controller only (v1: owner only). | None in the contract; the controller is named only as a salted commitment in v2. |
 
 ## Security assumptions and known limitations
 
 - **Testnet only.** This is a hackathon project on NEAR testnet. Do not deploy it to mainnet without a separate security review.
-- **The v1 registry leaks the publisher.** The live registry stores the publisher as a public owner. Contract v2 removes it, but v2 is implemented and tested, not yet deployed. Until the migration runs, the registry owner field is the known linking vector.
+- **The v1 registry leaked the publisher.** The live registry is now v2 (since 2026-11-07) and no longer stores an owner. The old owner is already public from v1 history, so legacy claims remain linkable by hash; only claims published under v2 are clean.
 - **A dedicated publisher is not anonymous.** NEAR transaction senders and history are public. A publisher account that always publishes for one treasury is correlatable by timing and behaviour. The v2 model reduces the leak; it does not eliminate correlation.
 - **Sampling is point in time.** The balance is sampled at selected block heights. It does not prove continuous possession between samples. The report says so plainly.
 - **The score does not prove identity, ownership, or creditworthiness.** It measures observable onchain activity. Counterparties are UNKNOWN by default. A sock puppet wallet is flagged, not proven to be a separate person.
@@ -106,10 +121,10 @@ VeilProof assumes an adversary who can read all public data (the chain, the regi
 ## Implemented vs planned
 
 **Implemented and tested in this repo:**
-- Multi wallet aggregation, NEP 413 link proof, deterministic claims engine, score v1 and v2, AI underwriter with deterministic guard, salted prover commitments (P2), predicate disclosure (P3), verifier bound disclosure (P4), privacy audit, registry contract v2 (implemented and tested, not deployed), real TEE attestation verification (DCAP quote, RTMR3, MRCONFIGID, response signature), five field verification model, sampling metadata and wide interval warnings, manipulation detection with risk flags and UNKNOWN labels, verifier panels and How verification works, adversarial test suites.
+- Multi wallet aggregation, NEP 413 link proof, deterministic claims engine, score v1 and v2, AI underwriter with deterministic guard, salted prover commitments (P2), predicate disclosure (P3), verifier bound disclosure (P4), privacy audit, registry contract v2 (implemented, tested, deployed and migrated 2026-11-07), real TEE attestation verification (DCAP quote, RTMR3, MRCONFIGID, response signature), five field verification model, sampling metadata and wide interval warnings, manipulation detection with risk flags and UNKNOWN labels, verifier panels and How verification works, adversarial test suites.
 
 **Planned / future work (not built):**
-- Registry v2 migration (implemented, tested, migration plan written; deployment is a separate decision).
+- Registry v2 migration (done 2026-11-07: v2 deployed, 7 claims migrated, publisher allowlist live, demo claim republished under v2).
 - In enclave verification of the verifier itself (NEAR AI Cloud is inference only; documented in [docs/in-enclave-verification.md](docs/in-enclave-verification.md)).
 - A relayer for publishing (design discussed; not built; would not make publishing anonymous).
 - GPU / NRAS verification of the attestation payload (recorded, not sent to NRAS by default).
@@ -123,12 +138,12 @@ score v2 is 0 to 1000 from seven components, all computed from the disclosed sna
 
 ## Status
 
-Built and live. Registry deployed on NEAR testnet. The live demo claim is a
+Built and live. Registry v2 deployed on NEAR testnet. The live demo claim is a
 multi wallet agent treasury proof: report `2e8675fa662f06a4`, publish tx
 `57GjE7cZM6QWTd3ToSyw6bCoXZjK3zWdoL3CXbF92hvk`, score band **solid** (the
 public report carries the band, not the exact score, the prover's own exact
 score is 770), AI underwriting **lend_with_limits, suggested limit 3 NEAR**.
-All 10 checks pass onchain, and the full test suite is green (260 tests: 259 passing, 1 skipped by design — the live attestation test, which needs a key).
+All 10 checks pass onchain, and the full test suite is green (262 tests: 261 passing, 1 skipped by design — the live attestation test, which needs a key).
 The live site runs the AI underwriting with a real attested summary. Earlier
 demo claims (`b05bf4684960ee83`, `a41d9faaa0a19148`, `86f237c0cf2e3fe6`, `bf2518ecb0791e4a`,
 `063feb0181ad5577`) stay valid onchain and were superseded, never revoked.
