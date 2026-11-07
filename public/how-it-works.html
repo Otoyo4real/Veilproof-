@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeilProof: How it works</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="bg-live" aria-hidden="true"><span class="orb orb-1"></span><span class="orb orb-2"></span><span class="orb orb-3"></span></div>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">VeilProof<span class="tag">NEAR testnet</span></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="siteNav" aria-label="Menu">&#9776;</button>
+    <nav class="site-nav" id="siteNav">
+      <a href="index.html">Home</a>
+      <a href="prove.html">Prove a Wallet</a>
+      <a href="demo.html">Demo</a>
+      <a href="verify.html">Verify</a>
+      <a href="how-it-works.html" aria-current="page">How it works</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+<section class="page-hero">
+  <p class="eyebrow">How it works</p>
+  <h1>How verification works</h1>
+  <p class="lede">Verification answers five separate questions, and each one gets
+  its own status. A report can pass four and fail one, and the page says
+  so plainly.</p>
+</section>
+
+<section class="section" aria-label="The five verification statuses">
+  <div class="feature-grid">
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h6"/></svg></span>
+      <h3>1. Source data</h3>
+      <p>The disclosure package holds a snapshot of the wallet history. The verifier hashes that snapshot and compares it with the data hash published onchain. If they match, the data is the data that was published.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 11h.01"/><path d="M12 11h.01"/><path d="M16 11h.01"/><path d="M8 15h.01"/><path d="M12 15h.01"/><path d="M16 15h.01"/><path d="M8 19h.01"/><path d="M12 19h.01"/><path d="M16 19h.01"/></svg></span>
+      <h3>2. Calculations</h3>
+      <p>The verifier reruns the claims, the credit score and the wallet link proofs from the snapshot, using the published policy. If the rerun gives the same answers as the report, the calculations reproduce.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-3.6 8-10V5l-8-3-8 3v7c0 6.4 8 10 8 10z"/><path d="M9 11.5l2 2 4-4.5"/></svg></span>
+      <h3>3. AI attestation</h3>
+      <p>The AI analysis ran inside a trusted enclave, and its attestation is checked on its own. A nonce match alone does not verify it. The panel shows which of the nonce, quote, signature and measurements were actually checked.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span>
+      <h3>4. Report integrity</h3>
+      <p>The report, evidence and policy hashes are compared with the onchain record, the disclosure is checked against the report commitment, and the registry is asked whether the claim is still valid. A report that was revoked or expired fails here even if everything else passes.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
+      <h3>5. Privacy</h3>
+      <p>The public report carries thresholds and a score band only, never exact values, and the wallet commitment uses a fresh salt per report. The panel says what the public report discloses and what it keeps private.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>
+      <h3>Sampling and limits</h3>
+      <p>Balance sampling is point in time only: it reads the balance at past block heights, so it proves a balance was held at those readings, not continuously between them. The report says so plainly, with its sample count and interval.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" aria-label="What the verifier can and cannot learn">
+  <h2 class="section-title">What the verifier can and cannot learn</h2>
+  <div class="card">
+    <p><strong>You can learn:</strong> whether the disclosed history supports the claims, whether the score reproduces, whether the report is the one that was published, whether it is still valid, and what the public report discloses.</p>
+    <p><strong>You cannot learn:</strong> the real world identity behind the wallet, whether a counterparty is independent of the prover, or anything about data that never touched the chain. The score measures observable onchain activity only. It is not a guarantee of repayment.</p>
+    <p><strong>What you see that the public does not:</strong> the wallet address and the exact values, because the prover sent you the disclosure package. Do not republish them. And one limit stays: the registry record names the publishing wallet as owner, so claims from one wallet can still be linked through the registry even though the report commitments cannot be matched.</p>
+  </div>
+</section>
+
+<section class="section" aria-label="The credit score">
+  <h2 class="section-title">The credit score, and its limits</h2>
+  <div class="card">
+    <p>The score is deterministic and portable: sustained balance, time weighted balance, activity, counterparty diversity, volume, failed transactions and staked balance, scored from the same public rules, so any verifier recomputes it from the same snapshots. A tampered score fails verification.</p>
+    <p>The score is also honest about what it cannot do. It measures observable onchain activity only. It does not prove identity, beneficial ownership, or creditworthiness. Counterparties are unknown by default: independence is never assumed, and repeated transfers, circular flows and concentrated counterparties are flagged as risk, not hidden.</p>
+    <p>The underwriting verdict from NEAR AI Cloud is advisory only. A thin score can never support a lend, by a deterministic guard, and any suggested limit is capped at the sustained balance.</p>
+  </div>
+  <p><a href="demo.html">See the live demo</a> · <a href="prove.html">Prove a Wallet</a> · <a href="verify.html">Verify a report</a></p>
+</section>
+
+<section class="cta-band" aria-label="Get started">
+  <h2>See it in action</h2>
+  <p>Run the live demo and watch a real claim verify, or prove your own wallet.</p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="demo.html">See the live demo</a>
+    <a class="btn btn-ghost" href="prove.html">Prove a Wallet</a>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>VeilProof: NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
+    <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
+    <p><a href="index.html">Home</a> · <a href="prove.html">Prove a Wallet</a> · <a href="demo.html">Demo</a> · <a href="verify.html">Verify</a> · <a href="how-it-works.html">How it works</a> · <a href="https://github.com/Otoyo4real/Veilproof-" target="_blank" rel="noopener">GitHub repository</a></p>
+  </div>
+</footer>
+
+<script src="nav.js"></script>
+</body>
+</html>

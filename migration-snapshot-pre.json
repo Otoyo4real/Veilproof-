@@ -1,0 +1,90 @@
+{
+  "code_hash": "8oiS486L51Spfc3iGsWJkNK5iaw2UEQp21o1mJHLm4wD",
+  "amount": "2998281795474119900000000",
+  "claims": {
+    "b05bf4684960ee83": {
+      "claim": {
+        "owner": "veilproof-demo.testnet",
+        "report_hash": "a1a0743313be8e6747cdb72521e33086929ba616ac70c097470b1db05afe638e",
+        "evidence_hash": "2c545f04a97f501a408d8d8512c0ca454643f1595a2a10b82d52807c6de383ec",
+        "policy_hash": "3b77a1797fa0fdab89d3af974229ed98b00f11d35b0a0ced84f8aca064171437",
+        "created_at": 1793985812800431600,
+        "expires_at": 1796577801000000000,
+        "revoked": false
+      },
+      "valid": true
+    },
+    "a41d9faaa0a19148": {
+      "claim": {
+        "owner": "veilproof-demo.testnet",
+        "report_hash": "34515ecf1e72eb7271243f2291ca64fff6496b21befc19238a780946ebf13495",
+        "evidence_hash": "3e1d04132b564e829bf6350e21bdecf78f65e79f790e73c8e4992dee84c20f4b",
+        "policy_hash": "3b77a1797fa0fdab89d3af974229ed98b00f11d35b0a0ced84f8aca064171437",
+        "created_at": 1793978283115215600,
+        "expires_at": 1796570271000000000,
+        "revoked": false
+      },
+      "valid": true
+    },
+    "86f237c0cf2e3fe6": {
+      "claim": {
+        "owner": "veilproof-demo.testnet",
+        "report_hash": "c24b59bc07b5708a0d47a45ef79434d537215d5c492f6a32fbdbc93773dc1b88",
+        "evidence_hash": "5423ff7ac8e7d0f6e69f37f6e1b2337d520d299be4e1bf847660e78a25fc265d",
+        "policy_hash": "19d194d1ca13ce2cb9460c2c79d47069d4930aaa4c89a18209f398b6639f6632",
+        "created_at": 1793966636985339100,
+        "expires_at": 1796558625000000000,
+        "revoked": false
+      },
+      "valid": true
+    },
+    "bf2518ecb0791e4a": {
+      "claim": {
+        "owner": "veilproof-demo.testnet",
+        "report_hash": "a69a3b9c9c2f91fd56164c1bac686086fb396780aeecdb8983bf5959a4a08628",
+        "evidence_hash": "ee8c72077f6d7ed733f3e8fa77ed2192b7b7457d3109567305c5fd05c5683d3a",
+        "policy_hash": "3b77a1797fa0fdab89d3af974229ed98b00f11d35b0a0ced84f8aca064171437",
+        "created_at": 1793972855960206000,
+        "expires_at": 1796564844000000000,
+        "revoked": false
+      },
+      "valid": true
+    },
+    "063feb0181ad5577": {
+      "claim": {
+        "owner": "veilproof-demo.testnet",
+        "report_hash": "1618c8eb344aacd8a53d3aad5f5dc2e5f3ea03de92b66a42c46206be86ce2559",
+        "evidence_hash": "be9c20bc5f05bdd6f88b7ee08ca0de1ec6385dbee2b055b58820447bb4983da0",
+        "policy_hash": "3b77a1797fa0fdab89d3af974229ed98b00f11d35b0a0ced84f8aca064171437",
+        "created_at": 1793973093278327800,
+        "expires_at": 1796565081000000000,
+        "revoked": false
+      },
+      "valid": true
+    },
+    "7c063555730c20fb": {
+      "claim": {
+        "owner": "veilproof-demo.testnet",
+        "report_hash": "3cd0ebb2c9c281d3eb2047b4744094bbe75094711ce2e4ce09089098a27a4320",
+        "evidence_hash": "2b47f80404a3b1811a7815fba2acf5a45b05924922afcd6bc2d8f51742e5d5e0",
+        "policy_hash": "3b77a1797fa0fdab89d3af974229ed98b00f11d35b0a0ced84f8aca064171437",
+        "created_at": 1793973247072824000,
+        "expires_at": 1796565235000000000,
+        "revoked": false
+      },
+      "valid": true
+    },
+    "6338dd5177383c8e": {
+      "claim": {
+        "owner": "veilproof-demo.testnet",
+        "report_hash": "0cb81df5e698adb63570e6fe2ad3b5dd367cb3f1f448273e8244cb815a69bc5b",
+        "evidence_hash": "680a3fc7a0ef3b9e46d53b2130c67440c3dad7c3558472bec481824018432b68",
+        "policy_hash": "6d03ba1f57cabfd4796a4e72987e5e4c2a98aaccbc7c2d378d52625e40cf8c2f",
+        "created_at": 1793963539035024600,
+        "expires_at": 1796555520000000000,
+        "revoked": true
+      },
+      "valid": false
+    }
+  }
+}

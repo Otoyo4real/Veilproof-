@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeilProof: Live demo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="bg-live" aria-hidden="true"><span class="orb orb-1"></span><span class="orb orb-2"></span><span class="orb orb-3"></span></div>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">VeilProof<span class="tag">NEAR testnet</span></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="siteNav" aria-label="Menu">&#9776;</button>
+    <nav class="site-nav" id="siteNav">
+      <a href="index.html">Home</a>
+      <a href="prove.html">Prove a Wallet</a>
+      <a href="demo.html" aria-current="page">Demo</a>
+      <a href="verify.html">Verify</a>
+      <a href="how-it-works.html">How it works</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+<section class="page-hero">
+  <p class="eyebrow">Live demo</p>
+  <h1>See it work, live, on this page</h1>
+  <p class="lede">No account, no wallet, no setup. One click verifies a real claim
+  published from the demo wallet against the live NEAR testnet registry.</p>
+</section>
+
+<section class="section" aria-label="Live demo">
+  <div class="card">
+    <p><button id="demoRunBtn" type="button">Run the live demo</button></p>
+    <p id="demoStatus" class="muted"></p>
+    <div id="demoResult" hidden>
+      <div id="demoBanner" class="banner"></div>
+      <h3>Checks</h3>
+      <div id="demoChecks"></div>
+      <h3>Claims in this report</h3>
+      <div id="demoClaims"></div>
+      <div id="demoPanels"></div>
+      <h3>Report facts</h3>
+      <div id="demoFacts"></div>
+    </div>
+  </div>
+  <p class="muted">The same verification runs on the <a href="verify.html">verifier portal</a>,
+  where any report can be checked from its report ID, report JSON and disclosure package.</p>
+</section>
+
+<section class="section" aria-label="Try tampering">
+  <h2 class="section-title">Try breaking it</h2>
+  <p class="section-lede">Verification is only worth something if tampering fails.
+  On the verifier portal, paste the demo report, change one number, and
+  verify again: the report hash and the claims check fail, and the page
+  says so plainly.</p>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-3.6 8-10V5l-8-3-8 3v7c0 6.4 8 10 8 10z"/><path d="M9 11.5l2 2 4-4.5"/></svg></span>
+      <h3>Ten checks, not one</h3>
+      <p>The verifier reruns the binding, the hashes, the claims, the score and the validity, and reports each one separately.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg></span>
+      <h3>Five statuses</h3>
+      <p>Source data, calculations, attestation, report integrity and privacy each get their own status, so a report can pass four and fail one.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
+      <h3>Privacy, measured</h3>
+      <p>The public report carries thresholds and a score band only. The privacy panel says what it discloses and what it keeps private.</p>
+    </div>
+  </div>
+  <p><a href="verify.html">Open the verifier portal</a> · <a href="how-it-works.html">How verification works</a></p>
+</section>
+
+<section class="cta-band" aria-label="Get started">
+  <h2>Want your own proof?</h2>
+  <p>Preview any wallet with no wallet connected, build a report, and publish its hashes onchain.</p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="prove.html">Prove a Wallet</a>
+    <a class="btn btn-ghost" href="verify.html">Verify a report</a>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>VeilProof: NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
+    <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
+    <p><a href="index.html">Home</a> · <a href="prove.html">Prove a Wallet</a> · <a href="demo.html">Demo</a> · <a href="verify.html">Verify</a> · <a href="how-it-works.html">How it works</a> · <a href="https://github.com/Otoyo4real/Veilproof-" target="_blank" rel="noopener">GitHub repository</a></p>
+  </div>
+</footer>
+
+<script src="nav.js"></script>
+<script type="module" src="demo.js"></script>
+</body>
+</html>
