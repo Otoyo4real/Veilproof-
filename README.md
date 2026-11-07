@@ -124,13 +124,13 @@ score v2 is 0 to 1000 from seven components, all computed from the disclosed sna
 ## Status
 
 Built and live. Registry deployed on NEAR testnet. The live demo claim is a
-multi wallet agent treasury proof: report `b05bf4684960ee83`, publish tx
-`3ouNst9DcYkcptEpua7EzqdLDmuY8P8uFsKRgU9TW9PQ`, score band **solid** (the
+multi wallet agent treasury proof: report `2e8675fa662f06a4`, publish tx
+`57GjE7cZM6QWTd3ToSyw6bCoXZjK3zWdoL3CXbF92hvk`, score band **solid** (the
 public report carries the band, not the exact score, the prover's own exact
-score is 770), AI underwriting **lend_with_limits, suggested limit 5 NEAR**.
+score is 770), AI underwriting **lend_with_limits, suggested limit 3 NEAR**.
 All 10 checks pass onchain, and the full test suite is green (260 tests: 259 passing, 1 skipped by design — the live attestation test, which needs a key).
 The live site runs the AI underwriting with a real attested summary. Earlier
-demo claims (`a41d9faaa0a19148`, `86f237c0cf2e3fe6`, `bf2518ecb0791e4a`,
+demo claims (`b05bf4684960ee83`, `a41d9faaa0a19148`, `86f237c0cf2e3fe6`, `bf2518ecb0791e4a`,
 `063feb0181ad5577`) stay valid onchain and were superseded, never revoked.
 Hackathon: NEAR Hackathon 2026 (Build Beyond Boundaries), tracks: Privacy &
 Private AI primary, Agent Economy second. Deadline: 14 Nov 2026 23:59 UTC.

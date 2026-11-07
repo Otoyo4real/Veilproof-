@@ -1,13 +1,24 @@
 # Registry v1 → v2 migration
 
-Status: **PLAN ONLY — not executed.** The v2 contract is implemented
-and tested in this repo (`contract/src/lib.rs`, `CONTRACT_VERSION`
-2.0.0, wasm built 2026-11-06, sha256
-`3e24a36ad6affc4130e962e881811cd1fcb36dfc2c100e17f769b5d744ecfd0a`).
-The deployed registry (`registry.veilproof.testnet`) is still v1.
-Deployment + migration is a separate step after review, and it needs
-Isaiah (the registry key holder) — the migrate call must be signed by
-the registry account itself.
+Status: **EXECUTED 2026-11-07.** The v2 contract is deployed on
+`registry.veilproof.testnet` (code hash `5BagTskCFZkCsbhyvP427hiujMAmnmwXvJCkA922o8S5`,
+wasm sha256 `3e24a36ad6affc4130e962e881811cd1fcb36dfc2c100e17f769b5d744ecfd0a`),
+migrated by tx `Fe8mDgcZrqHTnya7CHav2UDTaCCZgFgfiXenZe4hgJLd`
+(`contract_migrated`, 7 claims). The v1 rollback wasm was rebuilt
+from GitHub commit `9f3aa1801303` and reproduces the deployed v1 code
+hash exactly (`73f95f7b…`, base58 `8oiS486L51Spfc3iGsWJkNK5iaw2UEQp21o1mJHLm4wD`);
+it is kept at `contract/target/near/veilproof_registry-v1-rollback.wasm`
+(local only, never pushed). The dedicated publisher
+`publisher.veilproof.testnet` was created and funded with 0.5 NEAR.
+The demo claim was republished under v2 as `2e8675fa662f06a4`
+(tx `57GjE7cZM6QWTd3ToSyw6bCoXZjK3zWdoL3CXbF92hvk`, score 770 solid,
+AI lend_with_limits, limit 3 NEAR, all 10 checks pass); the old
+`b05bf4684960ee83` stays valid, superseded, never revoked. The
+migration found 7 live claims, not the 5 listed in §2 — the extra two
+are `7c063555730c20fb` (old v1 demo claim, valid) and
+`6338dd5177383c8e` (revoked e2e claim), both enumerated onchain via
+`get_owner_claims` and preserved. The plan below is kept as the
+record of what was done.
 
 ## 1. Assessment: in-place upgrade is possible (with a migration call)
 

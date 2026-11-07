@@ -1,14 +1,14 @@
 {
   "address": "veilproof-demo.testnet",
-  "dataHash": "5789e16242468141c8785e82d52161710f2062e6feb4f44e495329dc2ebfbf06",
-  "reportId": "b05bf4684960ee83",
+  "dataHash": "118fc5e74b53a8de4f21e2a797e7264133e98fe7af8120a165563c4d0cf8c9fa",
+  "reportId": "2e8675fa662f06a4",
   "snapshot": {
     "account": {
       "accountId": "veilproof-demo.testnet",
-      "amount": "11148040694449401200000000",
+      "amount": "11147607515713882200000000",
       "locked": "0",
       "storage_usage": 182,
-      "blockHeight": 276515245
+      "blockHeight": 276592931
     },
     "txs": [
       {
@@ -57,69 +57,69 @@
         "blockTimestampNs": "1793959408841161770"
       }
     ],
-    "blockHeight": 276515245,
+    "blockHeight": 276592931,
     "balanceSamples": [
       {
-        "blockHeight": 276512600,
-        "amount": "11148040694449401200000000",
-        "blockTimestampNs": "1793984070060846322"
+        "blockHeight": 276590292,
+        "amount": "11147780449103518000000000",
+        "blockTimestampNs": "1794030242325238536"
       },
       {
-        "blockHeight": 276513500,
-        "amount": "11148040694449401200000000",
-        "blockTimestampNs": "1793984629083706482"
+        "blockHeight": 276591192,
+        "amount": "11147780449103518000000000",
+        "blockTimestampNs": "1794030788809372423"
       },
       {
-        "blockHeight": 276514400,
-        "amount": "11148040694449401200000000",
-        "blockTimestampNs": "1793985178704100861"
+        "blockHeight": 276592092,
+        "amount": "11147780449103518000000000",
+        "blockTimestampNs": "1794031341346394266"
       },
       {
-        "blockHeight": 276515300,
-        "amount": "11148040694449401200000000",
-        "blockTimestampNs": "1793985730538890117"
+        "blockHeight": 276592992,
+        "amount": "11147607515713882200000000",
+        "blockTimestampNs": "1794031885576127686"
       }
     ],
     "balanceSampleWindowHours": 1,
-    "dataHash": "5789e16242468141c8785e82d52161710f2062e6feb4f44e495329dc2ebfbf06",
     "sampling": {
       "windowHours": 1,
       "intervalBlocks": 900,
       "sampleCount": 4,
-      "oldestBlock": 276512600,
-      "newestBlock": 276515300,
+      "oldestBlock": 276590292,
+      "newestBlock": 276592992,
       "sampleTimestamps": [
         {
-          "blockHeight": 276512600,
-          "timestampNs": "1793984070060846322",
+          "blockHeight": 276590292,
+          "timestampNs": "1794030242325238536",
           "source": "rpc"
         },
         {
-          "blockHeight": 276513500,
-          "timestampNs": "1793984629083706482",
+          "blockHeight": 276591192,
+          "timestampNs": "1794030788809372423",
           "source": "rpc"
         },
         {
-          "blockHeight": 276514400,
-          "timestampNs": "1793985178704100861",
+          "blockHeight": 276592092,
+          "timestampNs": "1794031341346394266",
           "source": "rpc"
         },
         {
-          "blockHeight": 276515300,
-          "timestampNs": "1793985730538890117",
+          "blockHeight": 276592992,
+          "timestampNs": "1794031885576127686",
           "source": "rpc"
         }
       ],
       "timestampSource": "rpc",
-      "lowestObservedSampledBalance": "11148040694449401200000000",
+      "lowestObservedSampledBalance": "11147607515713882200000000",
       "completeness": "complete",
       "missingHeights": [],
       "samplesRequested": 4,
       "wideIntervalWarning": null,
       "limitation": "Balance samples are point-in-time readings only. They show the balance at the sampled blocks; they do not prove the balance was held continuously between samples."
-    }
+    },
+    "dataHash": "118fc5e74b53a8de4f21e2a797e7264133e98fe7af8120a165563c4d0cf8c9fa"
   },
-  "salt": "e051737285cb7601ef5e809181b8f7d5",
+  "salt": "b23f6c503368504f9de10ffa020402da",
   "linked": [
     {
       "address": "demo2.veilproof.testnet",
@@ -130,7 +130,7 @@
           "amount": "1499955363487500000000000",
           "locked": "0",
           "storage_usage": 182,
-          "blockHeight": 276515325
+          "blockHeight": 276593043
         },
         "txs": [
           {
@@ -143,56 +143,55 @@
             "blockTimestampNs": "1793971079285340576"
           }
         ],
-        "blockHeight": 276515325,
+        "blockHeight": 276593043,
         "balanceSamples": [
           {
-            "blockHeight": 276512600,
+            "blockHeight": 276590292,
             "amount": "1499955363487500000000000",
-            "blockTimestampNs": "1793984070060846322"
+            "blockTimestampNs": "1794030242325238536"
           },
           {
-            "blockHeight": 276513500,
+            "blockHeight": 276591192,
             "amount": "1499955363487500000000000",
-            "blockTimestampNs": "1793984629083706482"
+            "blockTimestampNs": "1794030788809372423"
           },
           {
-            "blockHeight": 276514400,
+            "blockHeight": 276592092,
             "amount": "1499955363487500000000000",
-            "blockTimestampNs": "1793985178704100861"
+            "blockTimestampNs": "1794031341346394266"
           },
           {
-            "blockHeight": 276515300,
+            "blockHeight": 276592992,
             "amount": "1499955363487500000000000",
-            "blockTimestampNs": "1793985730538890117"
+            "blockTimestampNs": "1794031885576127686"
           }
         ],
         "balanceSampleWindowHours": 1,
-        "dataHash": "5a89e94c792fa943a256caa64da6a45690b732e60969ed87959c0039135c1caa",
         "sampling": {
           "windowHours": 1,
           "intervalBlocks": 900,
           "sampleCount": 4,
-          "oldestBlock": 276512600,
-          "newestBlock": 276515300,
+          "oldestBlock": 276590292,
+          "newestBlock": 276592992,
           "sampleTimestamps": [
             {
-              "blockHeight": 276512600,
-              "timestampNs": "1793984070060846322",
+              "blockHeight": 276590292,
+              "timestampNs": "1794030242325238536",
               "source": "rpc"
             },
             {
-              "blockHeight": 276513500,
-              "timestampNs": "1793984629083706482",
+              "blockHeight": 276591192,
+              "timestampNs": "1794030788809372423",
               "source": "rpc"
             },
             {
-              "blockHeight": 276514400,
-              "timestampNs": "1793985178704100861",
+              "blockHeight": 276592092,
+              "timestampNs": "1794031341346394266",
               "source": "rpc"
             },
             {
-              "blockHeight": 276515300,
-              "timestampNs": "1793985730538890117",
+              "blockHeight": 276592992,
+              "timestampNs": "1794031885576127686",
               "source": "rpc"
             }
           ],
@@ -203,9 +202,10 @@
           "samplesRequested": 4,
           "wideIntervalWarning": null,
           "limitation": "Balance samples are point-in-time readings only. They show the balance at the sampled blocks; they do not prove the balance was held continuously between samples."
-        }
+        },
+        "dataHash": "3464ad4bd86d95ddb88130b2dade9e1e477467bd744b6c0b02636e97ba6643cb"
       },
-      "salt": "f15c45c8080b1ed8a583f90dd4d984eb"
+      "salt": "13b72aa678134e9f7059d6d154a210b7"
     }
   ]
 }

@@ -1,6 +1,6 @@
 // VeilProof live demo claim integration test — pure, no network.
 //
-// Loads the committed demo files (report b05bf4684960ee83, disclosure,
+// Loads the committed demo files (report 2e8675fa662f06a4, disclosure,
 // policy) and runs the real verifier against a local record recomputed
 // from the report itself. This is the internal-consistency check; the
 // anchoring proof (the same hashes on the real registry record) was
@@ -9,7 +9,7 @@
 //
 // nowNs is the claim's onchain publish time (created_at), not the
 // wall clock: the demo transactions live in the 30-day windows ending
-// at publication, and the claim expires 2026-12-06, so a wall-clock
+// at publication, and the claim expires 2026-12-07, so a wall-clock
 // now would age the demo out of its own windows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,21 +24,23 @@ const report = read('public/demo-report.json');
 const disclosure = read('public/demo-disclosure.json');
 const policy = read('public/demo-policy.json');
 
-// The onchain record for b05bf4684960ee83, read live from
-// registry.veilproof.testnet (get_claim) on 2026-11-06.
-const ONCHAIN_REPORT_HASH = 'a1a0743313be8e6747cdb72521e33086929ba616ac70c097470b1db05afe638e';
-const ONCHAIN_EVIDENCE_HASH = '2c545f04a97f501a408d8d8512c0ca454643f1595a2a10b82d52807c6de383ec';
+// The onchain record for 2e8675fa662f06a4, read live from
+// registry.veilproof.testnet (get_claim) on 2026-11-07, after the v2
+// migration. Published from the dedicated publisher
+// publisher.veilproof.testnet (v2, no owner field).
+const ONCHAIN_REPORT_HASH = '0edbbc297f67729acf9a91768941c83bca6ff29c672c433b154393001e4b7532';
+const ONCHAIN_EVIDENCE_HASH = '72f07bb8dc83e8bb8d7fed5ec62aa1727a443db2ed5bdbcb06d3ca9a5e46eaca';
 const ONCHAIN_POLICY_HASH = '3b77a1797fa0fdab89d3af974229ed98b00f11d35b0a0ced84f8aca064171437';
-const PUBLISHED_AT_NS = '1793985812800431548';
+const PUBLISHED_AT_NS = '1794031991551539000';
 
 const CHECK_ORDER = ['prover_binding', 'report_hash', 'evidence_hash', 'policy_hash', 'data_hash', 'sampling', 'claims', 'score', 'link_proofs', 'validity'];
 
 test('demo claim: the committed files match the live onchain record', () => {
-  assert.equal(report.reportId, 'b05bf4684960ee83');
+  assert.equal(report.reportId, '2e8675fa662f06a4');
   assert.equal(reportHash(report), ONCHAIN_REPORT_HASH);
   assert.equal(evidenceHash(report.evidenceRefs), ONCHAIN_EVIDENCE_HASH);
   assert.equal(policyHash(report.policyVersion, policy), ONCHAIN_POLICY_HASH);
-  assert.equal(report.expiresAt, '1796577801000000000');
+  assert.equal(report.expiresAt, '1796623977000000000');
 });
 
 test('demo claim: all 10 checks pass, band solid, sampling complete with rpc timestamps', async () => {
@@ -77,7 +79,7 @@ test('demo claim: all 10 checks pass, band solid, sampling complete with rpc tim
   assert.equal(result.sampling.sampleCount, 4);
   assert.equal(result.sampling.intervalBlocks, 900);
   assert.equal(result.sampling.timestampSource, 'rpc');
-  assert.equal(result.sampling.lowestObservedSampledBalance, '12647996057936901200000000');
+  assert.equal(result.sampling.lowestObservedSampledBalance, '12647562879201382200000000');
   assert.equal(result.sampling.wideIntervalWarning, null);
   // The public report carries the same sampling record and score
   // extras the verifier recomputed.

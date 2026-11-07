@@ -268,7 +268,42 @@ function deriveAttestationStatus(attestationInput, report, nowNs) {
     });
   }
   const nonceMatched = tri(att.nonceMatched);
-  if (att.verifiable === true && nonceMatched === true) {
+  // The attestation record carries its own status (post-remediation):
+  // respect it. A record that says UNVERIFIED was not verified, not
+  // failed — the nonce echo is relabelled UNVERIFIED, and only a
+  // record that says FAILED (nonce mismatch, bad quote or signature)
+  // is a failure. VERIFIED is downgraded to UNVERIFIED here because
+  // this verifier did not recheck the quote, signature or
+  // measurements from the report alone (only the ref hash is in the
+  // report). Legacy records have no status field; for those, the old
+  // nonce-echo stamp (verifiable true with a matched nonce) is also
+  // UNVERIFIED. (verifiable is true only when the record status is
+  // VERIFIED, so it can no longer be the test for the nonce echo.)
+  const recordStatus = typeof att.status === 'string' ? att.status : null;
+  if (recordStatus === 'FAILED') {
+    return build({
+      status: 'FAILED',
+      method: 'NEAR AI attestation preflight, nonce echo',
+      model,
+      nonceMatched,
+      detail:
+        'The attestation did not verify when the analysis ran, so the AI analysis is unattested. The report itself can still verify, only the AI opinion lacks attestation.',
+    });
+  }
+  if (recordStatus === 'EXPIRED') {
+    return build({
+      status: 'EXPIRED',
+      method: 'NEAR AI attestation preflight, nonce echo',
+      model,
+      nonceMatched,
+      detail: 'The attestation evidence is past its validity period.',
+    });
+  }
+  if (
+    recordStatus === 'VERIFIED' ||
+    recordStatus === 'UNVERIFIED' ||
+    (att.verifiable === true && nonceMatched === true)
+  ) {
     return build({
       method: 'NEAR AI attestation preflight, nonce echo',
       model,

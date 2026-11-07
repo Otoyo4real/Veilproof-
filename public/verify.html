@@ -7,12 +7,17 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="bg-live" aria-hidden="true"><span class="orb orb-1"></span><span class="orb orb-2"></span><span class="orb orb-3"></span></div>
 <header class="site-header">
   <div class="wrap">
     <a class="brand" href="index.html">VeilProof<span class="tag">NEAR testnet</span></a>
-    <nav class="site-nav">
-      <a href="index.html">Prover</a>
-      <a href="verify.html" aria-current="page">Verifier portal</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="siteNav" aria-label="Menu">&#9776;</button>
+    <nav class="site-nav" id="siteNav">
+      <a href="index.html">Home</a>
+      <a href="prove.html">Prove a Wallet</a>
+      <a href="demo.html">Demo</a>
+      <a href="verify.html" aria-current="page">Verify</a>
+      <a href="how-it-works.html">How it works</a>
     </nav>
   </div>
 </header>
@@ -189,10 +194,12 @@ attestation panel says so.
   <div class="wrap">
     <p>VeilProof: NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
     <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
+    <p><a href="index.html">Home</a> · <a href="prove.html">Prove a Wallet</a> · <a href="demo.html">Demo</a> · <a href="verify.html">Verify</a> · <a href="how-it-works.html">How it works</a> · <a href="https://github.com/Otoyo4real/Veilproof-" target="_blank" rel="noopener">GitHub repository</a></p>
   </div>
 </footer>
 
 
+<script src="nav.js"></script>
 <script src="./js/nacl.min.js"></script>
 <script>
 (function () {
@@ -1400,7 +1407,37 @@ attestation panel says so.
       });
     }
     var attNonce = tri(att.nonceMatched);
-    if (att.verifiable === true && attNonce === true) {
+    // The attestation record carries its own status (post-remediation):
+    // respect it. A record that says UNVERIFIED was not verified, not
+    // failed — the nonce echo is relabelled UNVERIFIED, and only a
+    // record that says FAILED (nonce mismatch, bad quote or signature)
+    // is a failure. VERIFIED is downgraded to UNVERIFIED here because
+    // this verifier did not recheck the quote, signature or
+    // measurements from the report alone (only the ref hash is in the
+    // report). Legacy records have no status field; for those, the old
+    // nonce-echo stamp (verifiable true with a matched nonce) is also
+    // UNVERIFIED. (verifiable is true only when the record status is
+    // VERIFIED, so it can no longer be the test for the nonce echo.)
+    var recordStatus = typeof att.status === 'string' ? att.status : null;
+    if (recordStatus === 'FAILED') {
+      return build({
+        status: 'FAILED',
+        method: 'NEAR AI attestation preflight, nonce echo',
+        model: aiModel,
+        nonceMatched: attNonce,
+        detail: 'The attestation did not verify when the analysis ran, so the AI analysis is unattested. The report itself can still verify, only the AI opinion lacks attestation.'
+      });
+    }
+    if (recordStatus === 'EXPIRED') {
+      return build({
+        status: 'EXPIRED',
+        method: 'NEAR AI attestation preflight, nonce echo',
+        model: aiModel,
+        nonceMatched: attNonce,
+        detail: 'The attestation evidence is past its validity period.'
+      });
+    }
+    if (recordStatus === 'VERIFIED' || recordStatus === 'UNVERIFIED' || (att.verifiable === true && attNonce === true)) {
       return build({
         method: 'NEAR AI attestation preflight, nonce echo',
         model: aiModel,

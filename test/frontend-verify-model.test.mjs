@@ -446,7 +446,7 @@ test('model: flagged snapshot shows a real risk flag and a suspicious counterpar
   assert.ok(summariseVerification(result).notes.some((n) => n.startsWith('Credit score:')));
 });
 
-test('model: live demo claim b05bf4684960ee83 verifies end to end', () => {
+test('model: live demo claim 2e8675fa662f06a4 verifies end to end', () => {
   const report = JSON.parse(readFileSync(new URL('../public/demo-report.json', import.meta.url), 'utf8'));
   const disclosurePackage = JSON.parse(readFileSync(new URL('../public/demo-disclosure.json', import.meta.url), 'utf8'));
   const policy = JSON.parse(readFileSync(new URL('../public/demo-policy.json', import.meta.url), 'utf8'));
@@ -475,9 +475,9 @@ test('model: live demo claim b05bf4684960ee83 verifies end to end', () => {
   assert.equal(result.attestation_status.status, 'UNVERIFIED');
   assert.equal(result.sampling.sampleCount, 4);
   assert.equal(result.sampling.intervalBlocks, 900);
-  assert.equal(result.sampling.oldestBlock, 276512600);
-  assert.equal(result.sampling.newestBlock, 276515300);
-  assert.equal(result.sampling.lowestObservedSampledBalance, '12647996057936901200000000');
+  assert.equal(result.sampling.oldestBlock, 276590292);
+  assert.equal(result.sampling.newestBlock, 276592992);
+  assert.equal(result.sampling.lowestObservedSampledBalance, '12647562879201382200000000');
   assert.equal(result.sampling.completeness, 'complete');
   assert.equal(result.sampling.wideIntervalWarning, null);
   assert.equal(result.score.band, 'solid');
@@ -648,6 +648,8 @@ test('static: overstated attestation strings are gone and the new panels exist',
   const demoJs = readFileSync(new URL('../public/demo.js', import.meta.url), 'utf8');
   const appJs = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   const indexHtml = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  const demoHtml = readFileSync(new URL('../public/demo.html', import.meta.url), 'utf8');
+  const howHtml = readFileSync(new URL('../public/how-it-works.html', import.meta.url), 'utf8');
   const verifyHtml = readFileSync(new URL('../public/verify.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../public/style.css', import.meta.url), 'utf8');
   for (const [name, text] of [
@@ -661,9 +663,9 @@ test('static: overstated attestation strings are gone and the new panels exist',
     assert.equal(text.includes('NEAR AI Cloud, attested'), false, `${name} must not claim NEAR AI attestation`);
     assert.equal(text.includes('VALID, this report verifies.'), false, `${name} must not carry the old VALID headline`);
   }
-  assert.ok(indexHtml.includes('id="demoPanels"'), 'landing page must carry the demo panels container');
-  assert.ok(indexHtml.includes('How verification works'), 'landing page must explain how verification works');
-  assert.ok(indexHtml.includes('What the verifier can and cannot learn'), 'landing page must state what the verifier can and cannot learn');
+  assert.ok(demoHtml.includes('id="demoPanels"'), 'demo.html must carry the demo panels container');
+  assert.ok(howHtml.includes('How verification works'), 'how-it-works.html must explain how verification works');
+  assert.ok(howHtml.includes('What the verifier can and cannot learn'), 'how-it-works.html must state what the verifier can and cannot learn');
   for (const id of ['statuses', 'privacyPanel', 'attestationPanel', 'integrityPanel', 'samplingPanel', 'scorePanel']) {
     assert.ok(verifyHtml.includes(`id="${id}"`), `verify.html must carry the ${id} panel`);
   }

@@ -55,8 +55,8 @@ test('sampling: the real demo disclosure describes 4 rpc readings, interval 900,
   assert.equal(rec.windowHours, 1);
   assert.equal(rec.intervalBlocks, 900);
   assert.equal(rec.sampleCount, 4);
-  assert.equal(rec.oldestBlock, 276512600);
-  assert.equal(rec.newestBlock, 276515300);
+  assert.equal(rec.oldestBlock, 276590292);
+  assert.equal(rec.newestBlock, 276592992);
   assert.equal(rec.completeness, 'complete');
   assert.deepEqual(rec.missingHeights, []);
   assert.equal(rec.samplesRequested, 4);
@@ -65,7 +65,7 @@ test('sampling: the real demo disclosure describes 4 rpc readings, interval 900,
   assert.equal(rec.sampleTimestamps.length, 4);
   assert.ok(rec.sampleTimestamps.every((t) => t.source === 'rpc' && typeof t.timestampNs === 'string'));
   // Primary ~11.148 NEAR + linked ~1.5 NEAR at every height.
-  assert.equal(rec.lowestObservedSampledBalance, '12647996057936901200000000');
+  assert.equal(rec.lowestObservedSampledBalance, '12647562879201382200000000');
   assert.equal(rec.limitation, SAMPLING_LIMITATION);
 });
 

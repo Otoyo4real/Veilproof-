@@ -9,7 +9,7 @@
 //
 // Flow: snapshot -> claims -> AI attempt (expect not_configured) ->
 // report + tripwire + disclosure -> publish hashes onchain ->
-// verify all 7 checks -> tamper must FAIL -> revoke -> verify must
+// verify all 10 checks -> tamper must FAIL -> revoke -> verify must
 // FAIL on validity. Any step failing stops the run with a clear error;
 // nothing is ever reported as passing unless it actually passed.
 //
@@ -271,7 +271,7 @@ async function main() {
   ok(`publish_claim executed, tx ${publishTxHash}`);
   results.publishTxHash = publishTxHash;
 
-  // --- Step 6: fetch the onchain record and verify all 7 checks.
+  // --- Step 6: fetch the onchain record and verify all 10 checks.
   step('Fetch onchain record + verify the report (demo steps 9-11)');
   const claim = await demoAccount.viewFunction({
     contractId: REGISTRY_ID,
@@ -308,9 +308,9 @@ async function main() {
   for (const c of verified.checks) {
     info(`check ${c.check}: ${c.passed ? 'PASS' : 'FAIL'} — ${c.detail}`);
   }
-  check(verified.valid, 'verifyReport did not pass all 7 checks');
-  check(verified.checks.length === 7, `expected 7 checks, got ${verified.checks.length}`);
-  ok('all 7 verification checks pass; claim valid onchain');
+  check(verified.valid, 'verifyReport did not pass all 10 checks');
+  check(verified.checks.length === 10, `expected 10 checks, got ${verified.checks.length}`);
+  ok('all 10 verification checks pass; claim valid onchain');
   results.verifyChecks = verified.checks;
   results.onchainClaim = claim;
 

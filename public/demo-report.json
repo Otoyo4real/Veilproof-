@@ -1,10 +1,10 @@
 {
-  "reportId": "b05bf4684960ee83",
-  "prover": "73d5697ff4baa7c7b277de5a147e9b5b258e2706ffe63df259922bffda249c77",
+  "reportId": "2e8675fa662f06a4",
+  "prover": "4a41f328f257c3b4ea6c9073018c70a4e6af5767e89c10370878a4363f92ea6c",
   "linkedProvers": [
-    "22c043fd2b3dc41604bc6a51e31512a7e6501ebd63dee8ee181673d0ef86f66a"
+    "2141534d5e0f40b3f9482ce965e35d0bc5e94d0b1a80aff2a1bf05b5ac976ae2"
   ],
-  "createdAt": "2026-11-06T17:23:21.715Z",
+  "createdAt": "2026-11-07T06:12:57.892Z",
   "claims": [
     {
       "id": "balance_at_least",
@@ -58,28 +58,29 @@
     "model": "z-ai/glm-5.3-flash",
     "role": "underwriting",
     "verdict": "lend_with_limits",
-    "suggestedLimitNear": 5,
+    "suggestedLimitNear": 3,
     "confidence": "medium",
     "points": [
-      "Score 770 (solid) with all nine claims passing and zero failed transactions.",
-      "Sustained, aggregate, and time-weighted balances all equal ~12.65 NEAR, indicating the balance was held steadily rather than flashed.",
-      "Activity is thin: only 5 successful transactions in 30 days scored 70/150.",
-      "Counterparty diversity is weak at 30/100, suggesting few distinct counterparties.",
-      "No staked balance (0/50), leaving that component unearned.",
-      "Balance components are maxed but the profile leans on holdings over demonstrated activity, so a capped limit is prudent.",
-      "Suggested limit of 5 NEAR is well under the ~12.65 NEAR sustained balance actually held."
+      "Score 770 (solid band) with all nine claims passed; the balance side of the profile is genuinely strong.",
+      "Sustained and time-weighted balance components are maxed: roughly 12.65 NEAR held across the whole window, so a flash-deposit pattern is unlikely.",
+      "Activity is thin: only 5 successful transactions in 30 days against a 30-tx threshold, scoring 70/150 on the activity component.",
+      "Counterparty diversity is weak (30/100): all 4 external transactions in the window go to a single outside counterparty, a medium-severity concentration flag.",
+      "That sole outside counterparty is labeled suspicious and there are internal transfers between the bundle's own wallets, so the activity may be self-dealing rather than organic usage.",
+      "No failed transactions (100/100) is clean, but zero staked balance (0/50) adds nothing to long-term-skin-in-the-game evidence.",
+      "Suggested limit of 3 NEAR is a cautious fraction (~24%) of the demonstrated sustained balance of ~12.65 NEAR, reflecting strong collateral evidence offset by thin, concentrated history."
     ],
     "attestation": {
-      "verifiable": true,
+      "status": "UNVERIFIED",
+      "verifiable": false,
       "nonceMatched": true,
-      "ref": "e4f53f09546798a20d2c562b136f1ffdb08b0745d6c19e1330566cd7865df949"
+      "ref": "083680670c1d0ab9c44bfcd6c8a3cf8b6138c124bc0c99d28a216d0cb4790761"
     }
   },
   "evidenceRefs": {
-    "attestationRef": "e4f53f09546798a20d2c562b136f1ffdb08b0745d6c19e1330566cd7865df949",
-    "dataHash": "b428cc36b9e004b702e78e58b02262388f609df3c46eecb8936014a6ba7bf8c8"
+    "attestationRef": "083680670c1d0ab9c44bfcd6c8a3cf8b6138c124bc0c99d28a216d0cb4790761",
+    "dataHash": "d0a16e41aa8ff1019320946b94740899c018e4da8802705f9788557b298c7cd0"
   },
-  "expiresAt": "1796577801000000000",
+  "expiresAt": "1796623977000000000",
   "disclosed": [
     "balance_at_least",
     "tx_count_in_window",
@@ -161,32 +162,32 @@
     "windowHours": 1,
     "intervalBlocks": 900,
     "sampleCount": 4,
-    "oldestBlock": 276512600,
-    "newestBlock": 276515300,
+    "oldestBlock": 276590292,
+    "newestBlock": 276592992,
     "sampleTimestamps": [
       {
-        "blockHeight": 276512600,
-        "timestampNs": "1793984070060846322",
+        "blockHeight": 276590292,
+        "timestampNs": "1794030242325238536",
         "source": "rpc"
       },
       {
-        "blockHeight": 276513500,
-        "timestampNs": "1793984629083706482",
+        "blockHeight": 276591192,
+        "timestampNs": "1794030788809372423",
         "source": "rpc"
       },
       {
-        "blockHeight": 276514400,
-        "timestampNs": "1793985178704100861",
+        "blockHeight": 276592092,
+        "timestampNs": "1794031341346394266",
         "source": "rpc"
       },
       {
-        "blockHeight": 276515300,
-        "timestampNs": "1793985730538890117",
+        "blockHeight": 276592992,
+        "timestampNs": "1794031885576127686",
         "source": "rpc"
       }
     ],
     "timestampSource": "rpc",
-    "lowestObservedSampledBalance": "12647996057936901200000000",
+    "lowestObservedSampledBalance": "12647562879201382200000000",
     "completeness": "complete",
     "missingHeights": [],
     "samplesRequested": 4,

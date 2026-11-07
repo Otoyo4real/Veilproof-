@@ -92,6 +92,10 @@ The balance estimator now reads the claim threshold (1 NEAR) instead of the exac
 
 New live demo claim `b05bf4684960ee83`, publish tx `3ouNst9DcYkcptEpua7EzqdLDmuY8P8uFsKRgU9TW9PQ` (script `scripts/publish-demo-claim.mjs`, salts + predicate format). The audit's live-claim line now reads: dictionary recovery **no**, exact balance visible **no**, exact score visible **no**. The old claim `a41d9faaa0a19148` stays valid onchain, superseded, never revoked. The landing-page mock report and README now show the new claim in predicate form (Pass + threshold, band only).
 
+## Demo claim republished (registry v2), 2026-11-07
+
+Registry migrated v1 to v2 (`docs/contract-migration.md`): 7 claims migrated, no owner field anywhere in v2. New live demo claim `2e8675fa662f06a4`, publish tx `57GjE7cZM6QWTd3ToSyw6bCoXZjK3zWdoL3CXbF92hvk`, published from the dedicated publisher `publisher.veilproof.testnet` (publisher as its own controller; the treasury never appears onchain). Score 770 (solid), AI underwriting lend_with_limits, suggested limit 3 NEAR, all 10 checks pass. The old claim `b05bf4684960ee83` stays valid onchain, superseded, never revoked. The audit numbers are unchanged: the v2 claim carries the same predicate public report, so the live-claim line still reads dictionary recovery **no**, exact balance visible **no**, exact score visible **no**.
+
 ## Results — AFTER P4 (public report unchanged; disclosure package sealed)
 
 P4 (verifier-bound disclosure, `docs/verifier-bound-disclosure.md`)
@@ -128,7 +132,7 @@ numbers are from a real run (`npm run audit`, 2026-11-06):
 | (b) Linking via registry commitment | no clusters at all (every claim's commitment is unique; 0 predicted pairs) | chance 1.0% | **PASS** |
 | (c) Balance estimate error (mean) | 94.04% | exact = 0% | **PASS** |
 | (c) Score estimate error (mean) | 6.22% | exact = 0% | **PASS** |
-| Live demo claim `b05bf4684960ee83` | dictionary recovery no, exact balance visible no, exact score visible no | — | **PASS** |
+| Live demo claim `2e8675fa662f06a4` | dictionary recovery no, exact balance visible no, exact score visible no | — | **PASS** |
 
 Verdict: **CLEAN**. The registry no longer offers any linking vector
 in its public views: with a fresh salt per claim, two claims from the

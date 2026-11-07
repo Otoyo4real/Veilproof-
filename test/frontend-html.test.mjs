@@ -1,28 +1,25 @@
-// Sanity checks for public/index.html + public/app.js.
+// Sanity checks for the multi-page site + public/app.js.
 //
-// This VM has no working local Chrome, so the page is validated by
-// parsing instead of rendering: the required element ids exist, every
-// id app.js looks up is present in the HTML, the wallet library and
-// the app module are wired up, and the page hardcodes no wallet
-// address (the demo address lives only in demo-history.json, loaded
-// at runtime for the wallet it belongs to).
+// This VM has no working local Chrome, so the pages are validated by
+// parsing instead of rendering: the required element ids exist on the
+// page that owns them (the prover lives on prove.html, the live demo
+// on demo.html), every id app.js looks up is present on prove.html,
+// the wallet library and the app module are wired up there, and no
+// page hardcodes a wallet address (the demo address lives only in
+// demo-history.json, loaded at runtime for the wallet it belongs to).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+const proveHtml = readFileSync(new URL('../public/prove.html', import.meta.url), 'utf8');
+const demoHtml = readFileSync(new URL('../public/demo.html', import.meta.url), 'utf8');
 const appJs = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
 
-const REQUIRED_IDS = [
+// The prover ids live on prove.html; the live demo ids live on demo.html.
+const PROVER_IDS = [
   'previewAddress',
-  'demoRunBtn',
-  'demoStatus',
-  'demoResult',
-  'demoBanner',
-  'demoChecks',
-  'demoClaims',
-  'demoFacts',
   'connectBtn',
   'walletStatus',
   'accountLine',
@@ -67,53 +64,87 @@ const REQUIRED_IDS = [
   'publishOut',
 ];
 
-test('index.html is a complete document with the wallet lib and the app module', () => {
+const DEMO_IDS = [
+  'demoRunBtn',
+  'demoStatus',
+  'demoResult',
+  'demoBanner',
+  'demoChecks',
+  'demoClaims',
+  'demoFacts',
+];
+
+const ALL_PAGES = [
+  ['index.html', html],
+  ['prove.html', proveHtml],
+  ['demo.html', demoHtml],
+  ['verify.html', readFileSync(new URL('../public/verify.html', import.meta.url), 'utf8')],
+  ['how-it-works.html', readFileSync(new URL('../public/how-it-works.html', import.meta.url), 'utf8')],
+];
+
+test('index.html is a complete landing document and links every page', () => {
   assert.ok(html.startsWith('<!DOCTYPE html>'), 'must start with a doctype');
   assert.ok(html.trimEnd().endsWith('</html>'), 'must end with </html>');
-  assert.ok(
-    html.includes('https://cdn.jsdelivr.net/npm/@fastnear/wallet@2.5.0/dist/umd/browser.global.js'),
-    'must load the @fastnear/wallet UMD bundle (same version as Genesis)',
-  );
-  assert.ok(html.includes('<script type="module" src="app.js"></script>'), 'must load app.js as a module');
-  assert.ok(html.includes('href="verify.html"'), 'must link to the verifier portal');
+  assert.ok(html.includes('width=device-width, initial-scale=1'), 'must set the viewport');
+  for (const page of ['prove.html', 'demo.html', 'verify.html', 'how-it-works.html']) {
+    assert.ok(html.includes(`href="${page}"`), `landing page must link to ${page}`);
+  }
   assert.ok(html.includes('registry.veilproof.testnet'), 'must name the registry contract');
   assert.ok(html.includes('testnet'), 'must say testnet');
 });
 
-test('every required element id exists in index.html', () => {
-  for (const id of REQUIRED_IDS) {
-    assert.ok(html.includes(`id="${id}"`), `index.html is missing id="${id}"`);
+test('prove.html is a complete document with the wallet lib and the app module', () => {
+  assert.ok(proveHtml.startsWith('<!DOCTYPE html>'), 'must start with a doctype');
+  assert.ok(proveHtml.trimEnd().endsWith('</html>'), 'must end with </html>');
+  assert.ok(
+    proveHtml.includes('https://cdn.jsdelivr.net/npm/@fastnear/wallet@2.5.0/dist/umd/browser.global.js'),
+    'must load the @fastnear/wallet UMD bundle (same version as Genesis)',
+  );
+  assert.ok(proveHtml.includes('<script type="module" src="app.js"></script>'), 'must load app.js as a module');
+  assert.ok(proveHtml.includes('href="verify.html"'), 'must link to the verifier portal');
+  assert.ok(proveHtml.includes('registry.veilproof.testnet'), 'must name the registry contract');
+  assert.ok(proveHtml.includes('testnet'), 'must say testnet');
+});
+
+test('every required element id exists on the page that owns it', () => {
+  for (const id of PROVER_IDS) {
+    assert.ok(proveHtml.includes(`id="${id}"`), `prove.html is missing id="${id}"`);
+  }
+  for (const id of DEMO_IDS) {
+    assert.ok(demoHtml.includes(`id="${id}"`), `demo.html is missing id="${id}"`);
   }
   const seen = new Set();
-  for (const id of REQUIRED_IDS) {
+  for (const id of [...PROVER_IDS, ...DEMO_IDS]) {
     assert.ok(!seen.has(id), `duplicate required id ${id}`);
     seen.add(id);
   }
 });
 
-test('every id app.js looks up exists in index.html', () => {
+test('every id app.js looks up exists in prove.html', () => {
   const used = [...appJs.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]);
   const unique = [...new Set(used)];
   assert.ok(unique.length > 20, `expected app.js to look up many ids, found ${unique.length}`);
   for (const id of unique) {
-    assert.ok(html.includes(`id="${id}"`), `app.js looks up id="${id}" but index.html has no such element`);
+    assert.ok(proveHtml.includes(`id="${id}"`), `app.js looks up id="${id}" but prove.html has no such element`);
   }
 });
 
-test('index.html hardcodes no wallet address', () => {
+test('no page hardcodes a wallet address', () => {
   // registry.veilproof.testnet is the contract, not a wallet — it is
   // supposed to be named. Strip it first, then no wallet address may
-  // remain.
-  const withoutRegistry = html.replaceAll('registry.veilproof.testnet', '');
-  assert.ok(!withoutRegistry.includes('veilproof-demo.testnet'), 'demo wallet address must not be hardcoded in the page');
-  assert.ok(!withoutRegistry.includes('veilproof.testnet'), 'deployer wallet address must not be hardcoded in the page');
-  assert.ok(!html.includes('testnet-accounts'), 'key file must never be referenced from the page');
+  // remain on any page.
+  for (const [name, src] of ALL_PAGES) {
+    const withoutRegistry = src.replaceAll('registry.veilproof.testnet', '');
+    assert.ok(!withoutRegistry.includes('veilproof-demo.testnet'), `${name}: demo wallet address must not be hardcoded in the page`);
+    assert.ok(!withoutRegistry.includes('veilproof.testnet'), `${name}: deployer wallet address must not be hardcoded in the page`);
+    assert.ok(!src.includes('testnet-accounts'), `${name}: key file must never be referenced from the page`);
+  }
 });
 
 test('preview flow: paste an address to preview, wallet only to sign and publish', () => {
   // The preview is read-only and needs no wallet; ownership is proved
   // only by the connected wallet that owns the previewed address.
-  assert.ok(html.includes('id="previewAddress"'), 'index.html must have the preview address input');
+  assert.ok(proveHtml.includes('id="previewAddress"'), 'prove.html must have the preview address input');
   assert.ok(appJs.includes('readPreviewAddress'), 'app.js must read and validate the preview address');
   assert.ok(appJs.includes('previewMatchesConnected'), 'app.js must bind signing/publishing to the owning wallet');
   assert.ok(
