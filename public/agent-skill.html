@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeilProof: Agent skill</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="bg-live" aria-hidden="true"><span class="orb orb-1"></span><span class="orb orb-2"></span><span class="orb orb-3"></span></div>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="index.html">VeilProof<span class="tag">NEAR testnet</span></a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="siteNav" aria-label="Menu">&#9776;</button>
+    <nav class="site-nav" id="siteNav">
+      <a href="index.html">Home</a>
+      <a href="prove.html">Prove a Wallet</a>
+      <a href="demo.html">Demo</a>
+      <a href="verify.html">Verify</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="agent-skill.html" aria-current="page">Agent skill</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+<section class="page-hero">
+  <p class="eyebrow">Agent skill</p>
+  <h1>Use VeilProof from your agent</h1>
+  <p class="lede">The skill teaches an agent to prove a wallet, verify a report, or judge a claim. Install it once, then ask your agent in plain words.</p>
+</section>
+
+<section class="section" aria-label="What the skill is">
+  <h2 class="section-title">What the skill is</h2>
+  <div class="card">
+    <p>One file, <a href="skill.md">skill.md</a>, written for an agent to read. It holds the prove a wallet steps, the verify a report steps, the ten checks, the registry methods, and the demo claim as a worked example. It is the same file an AI judge reads to check a claim.</p>
+    <p>A skill is a folder with a file named <span class="mono">SKILL.md</span> inside it. The setup below downloads our file and saves it under that name, in the folder your agent reads.</p>
+  </div>
+</section>
+
+<section class="section" aria-label="Claude Code setup">
+  <h2 class="section-title">Claude Code</h2>
+  <div class="card">
+    <p><strong>For every project on this machine.</strong> Run this one command, then start a new session.</p>
+    <pre><code>mkdir -p ~/.claude/skills/veilproof &amp;&amp; curl -sL https://veilproof22.vercel.app/skill.md -o ~/.claude/skills/veilproof/SKILL.md</code></pre>
+    <p><strong>For one project only.</strong> Run this inside your project folder instead.</p>
+    <pre><code>mkdir -p .claude/skills/veilproof &amp;&amp; curl -sL https://veilproof22.vercel.app/skill.md -o .claude/skills/veilproof/SKILL.md</code></pre>
+    <p>Check it is there with <span class="mono">/skills</span> in Claude Code. A skill added mid session is not picked up until you start a new one.</p>
+  </div>
+</section>
+
+<section class="section" aria-label="Other coding agents">
+  <h2 class="section-title">Codex, Cursor, Gemini CLI</h2>
+  <div class="card">
+    <p>These agents read the same file from a different folder. In your project, save it as <span class="mono">.agents/skills/veilproof/SKILL.md</span>. For every project, save it as <span class="mono">~/.agents/skills/veilproof/SKILL.md</span> instead.</p>
+    <pre><code>mkdir -p .agents/skills/veilproof &amp;&amp; curl -sL https://veilproof22.vercel.app/skill.md -o .agents/skills/veilproof/SKILL.md</code></pre>
+  </div>
+</section>
+
+<section class="section" aria-label="Any other agent">
+  <h2 class="section-title">Any other agent</h2>
+  <div class="card">
+    <p>Download <a href="skill.md">skill.md</a>, or give your agent this link and ask it to read the file: <span class="mono">https://veilproof22.vercel.app/skill.md</span>. Any agent that can read a file can follow it. That includes Muse: paste the link, or the file, and ask it to use the skill.</p>
+  </div>
+</section>
+
+<section class="section" aria-label="How to use it">
+  <h2 class="section-title">Once it is installed, ask in plain words</h2>
+  <div class="card">
+    <p>Your agent reads the skill when your request matches it. These all work:</p>
+    <p><span class="mono">Use the veilproof skill to prove my NEAR testnet wallet.</span></p>
+    <p><span class="mono">Use the veilproof skill to verify report 2e8675fa662f06a4.</span></p>
+    <p><span class="mono">Use the veilproof skill to judge this claim.</span></p>
+    <p>For a judge, the skill has a section with three steps to check a claim against the live registry. No wallet is needed to judge: the demo claim verifies from public data alone.</p>
+  </div>
+  <p><a href="skill.md">Read the skill file itself</a> · <a href="demo.html">See the live demo</a> · <a href="prove.html">Prove a Wallet</a></p>
+</section>
+
+<section class="cta-band" aria-label="Get started">
+  <h2>See it in action</h2>
+  <p>Run the live demo and watch a real claim verify, or prove your own wallet.</p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="demo.html">See the live demo</a>
+    <a class="btn btn-ghost" href="prove.html">Prove a Wallet</a>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>VeilProof: NEAR Hackathon 2026, Privacy &amp; Private AI track.</p>
+    <p>Testnet only. Registry: <span class="mono">registry.veilproof.testnet</span>.</p>
+    <p><a href="index.html">Home</a> · <a href="prove.html">Prove a Wallet</a> · <a href="demo.html">Demo</a> · <a href="verify.html">Verify</a> · <a href="how-it-works.html">How it works</a> · <a href="agent-skill.html">Agent skill</a> · <a href="https://github.com/Otoyo4real/Veilproof-" target="_blank" rel="noopener">GitHub repository</a></p>
+  </div>
+</footer>
+
+<script src="nav.js"></script>
+</body>
+</html>

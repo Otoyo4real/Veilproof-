@@ -8,7 +8,7 @@ The use case is simple. Agents are starting to pay each other: compute, invoices
 
 Live site: https://veilproof22.vercel.app/
 
-Agent skill: https://veilproof22.vercel.app/skill.md — the full prove and verify steps for agents, including AI judges, with the ten checks, the registry methods, and the demo claim as a worked example.
+Agent skill: https://veilproof22.vercel.app/agent-skill.html — how to set up the skill in Claude Code or any other agent, with the full prove and verify steps. The skill file itself is https://veilproof22.vercel.app/skill.md.
 
 ## Privacy first
 
@@ -171,9 +171,11 @@ Testnet only.
    the sealed package and your verifier secret key (or generate a
    keypair there first). See `docs/verifier-bound-disclosure.md`.
 5. Agents, including AI judges, can use the skill at
-   https://veilproof22.vercel.app/skill.md. It gives the full prove
-   and verify steps, the ten checks, the registry methods, and the
-   demo claim as a worked example.
+   https://veilproof22.vercel.app/agent-skill.html, which shows how
+   to set it up in Claude Code or any other agent. The skill file
+   itself is https://veilproof22.vercel.app/skill.md. It gives the
+   full prove and verify steps, the ten checks, the registry methods,
+   and the demo claim as a worked example.
 
 Do X, see Y. Nothing is faked: every check above runs against the live
 testnet registry, and a failed check says so.

@@ -148,18 +148,27 @@ test('agent skill: linked from every page and named in the README', () => {
   // must be linked from the site and named in the README, or no one
   // finds it. It sits at the top: in the header nav on every page,
   // and near the top of the README, not buried in the footer or in
-  // the Judge section alone.
-  const pages = ['index.html', 'prove.html', 'demo.html', 'verify.html', 'how-it-works.html'];
+  // the Judge section alone. The link goes to a guide page that
+  // shows how to set the skill up in Claude Code or any other agent,
+  // not straight to the raw markdown file, which a browser shows as
+  // plain text.
+  const pages = ['index.html', 'prove.html', 'demo.html', 'verify.html', 'how-it-works.html', 'agent-skill.html'];
   for (const page of pages) {
     const html = readFileSync(new URL(`../public/${page}`, import.meta.url), 'utf8');
-    assert.ok(html.includes('skill.md'), `${page} must link to the agent skill`);
+    assert.ok(html.includes('agent-skill.html'), `${page} must link to the agent skill guide`);
     const nav = html.match(/<nav class="site-nav"[\s\S]*?<\/nav>/);
-    assert.ok(nav && nav[0].includes('skill.md'), `${page} must link the skill from its top nav`);
+    assert.ok(nav && nav[0].includes('agent-skill.html'), `${page} must link the skill from its top nav`);
+    assert.ok(!nav[0].includes('href="skill.md"'), `${page} must not link the top nav straight to the raw skill file`);
   }
+  const guide = readFileSync(new URL('../public/agent-skill.html', import.meta.url), 'utf8');
+  assert.ok(guide.includes('Claude Code'), 'the skill guide must cover Claude Code');
+  assert.ok(guide.includes('~/.claude/skills/veilproof/SKILL.md'), 'the skill guide must give the Claude Code install path');
+  assert.ok(guide.includes('.agents/skills/veilproof/SKILL.md'), 'the skill guide must cover other coding agents');
+  assert.ok(guide.includes('href="skill.md"'), 'the skill guide must link the raw skill file');
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  assert.ok(readme.includes('skill.md'), 'README must name the agent skill');
+  assert.ok(readme.includes('agent-skill.html'), 'README must name the agent skill guide');
   const top = readme.slice(0, readme.indexOf('## Privacy first'));
-  assert.ok(top.includes('skill.md'), 'README must name the agent skill near the top');
+  assert.ok(top.includes('agent-skill.html'), 'README must name the agent skill guide near the top');
   const skill = readFileSync(new URL('../public/skill.md', import.meta.url), 'utf8');
   assert.ok(skill.includes('For a judge'), 'skill.md must keep its section for a judge');
 });
