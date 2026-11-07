@@ -142,6 +142,22 @@ test('no page hardcodes a wallet address', () => {
   }
 });
 
+test('agent skill: linked from every page and named in the README', () => {
+  // The skill is what lets an agent, including an AI judge, use
+  // VeilProof. It is not enough for it to exist at /skill.md: it
+  // must be linked from the site and named in the README, or no one
+  // finds it.
+  const pages = ['index.html', 'prove.html', 'demo.html', 'verify.html', 'how-it-works.html'];
+  for (const page of pages) {
+    const html = readFileSync(new URL(`../public/${page}`, import.meta.url), 'utf8');
+    assert.ok(html.includes('skill.md'), `${page} must link to the agent skill`);
+  }
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.ok(readme.includes('skill.md'), 'README must name the agent skill');
+  const skill = readFileSync(new URL('../public/skill.md', import.meta.url), 'utf8');
+  assert.ok(skill.includes('For a judge'), 'skill.md must keep its section for a judge');
+});
+
 test('snapshot: a wallet with thousands of transactions still fetches in seconds', () => {
   // Verifying every transaction would take minutes for a busy wallet,
   // no matter how parallel it is. The snapshot verifies at most the
