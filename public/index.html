@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VeilProof: Prove you&rsquo;re good for it, without handing over your wallet</title>
+<title>VeilProof: Prove you can pay without ever revealing your wallet</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -27,17 +27,19 @@
   <div class="hero-grid">
     <div>
       <p class="eyebrow">NEAR Hackathon 2026 · Privacy &amp; Private AI · Agent Economy</p>
-      <h1>Prove an agent is good for it, without handing over its wallet</h1>
-      <p class="lede">Agents are starting to pay each other: compute, invoices,
-      OTC deals. Before a deal, the other side wants proof the agent can
-      pay, but publishing a treasury wallet invites targeting, scams and
-      front running. VeilProof changes the deal. An agent proves its
-      treasury across every wallet it holds, proves the balance was HELD
-      and not just deposited an hour ago, and carries a portable credit
-      score any app can recompute from the same public rules. The facts
-      come from the chain itself, so they cannot be faked. Only hashes of
-      the wallets are ever published; the addresses go only to the
-      verifier the agent chose, in a private package.</p>
+      <h1>Your wallet address is your whole financial life. Prove you can pay without ever revealing it.</h1>
+      <p class="lede">Anyone who sees your wallet address sees every balance,
+      every transfer, every counterparty you have ever dealt with. That is
+      why an agent cannot just publish a treasury wallet to prove it can
+      pay: it invites targeting, scams and front running. VeilProof proves
+      the treasury across every wallet the agent holds, proves the balance
+      was HELD and not just deposited an hour ago, and carries a portable
+      credit score any app can recompute from the same public rules, while
+      the address itself never goes public. Only hashes and claims are
+      published. The exact values are sealed for the verifier alone, and a
+      fresh random salt per report means two reports from the same treasury
+      cannot be linked from the public record. The facts come from the
+      chain itself, so they cannot be faked.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="prove.html">Prove a Wallet</a>
         <a class="btn btn-ghost" href="demo.html">See the live demo</a>
@@ -60,6 +62,35 @@
       <p class="mock-foot">Anchored on NEAR testnet · <a href="demo.html">run the live demo</a></p>
     </div>
   </div>
+</section>
+
+<section class="section" aria-label="What stays private">
+  <h2 class="section-title">What stays private</h2>
+  <p class="section-lede">Privacy is the point, not a feature. Here is exactly
+  what the public sees, and what it never sees.</p>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-3.6 8-10V5l-8-3-8 3v7c0 6.4 8 10 8 10z"/><path d="M9 11.5l2 2 4-4.5"/></svg></span>
+      <h3>The address never goes public</h3>
+      <p>Only a hash commitment of the wallet is ever published. The address itself travels only in a private disclosure package to the verifier you chose, and only because you shared it with them.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+      <h3>Exact values stay sealed</h3>
+      <p>The public report carries thresholds and a score band only, never an exact balance. The exact figures are sealed for the verifier alone, and a tampered report fails verification.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span>
+      <h3>Reports cannot be linked</h3>
+      <p>A fresh random salt per report means two reports from the same treasury share no identifier. The public cannot tell they came from the same wallet.</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-6 4 3 5-8"/></svg></span>
+      <h3>Measured, not promised</h3>
+      <p>We ran a privacy audit with 50 simulated provers. From the public report alone, an attacker recovered 0 of 50 addresses, and its balance guesses were off by 94 percent. The numbers are in the README, not a slogan.</p>
+    </div>
+  </div>
+  <p>One honest limit: the privacy is from the public, not from the verifier you chose. They must see the address to recheck the chain, so you share it with them and no one else. <a href="how-it-works.html">Read the full explanation</a>.</p>
 </section>
 
 <section class="section" aria-label="Why VeilProof">
