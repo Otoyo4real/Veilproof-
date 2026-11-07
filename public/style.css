@@ -423,15 +423,17 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; colo
 }
 
 /* ---------- live background ---------- */
-/* A slow, soft animated backdrop: three blurred orbs drift across a
-   light base, plus a faint dot grid. Content always sits on solid
-   cards above it, so readability never depends on the animation.
-   The orbs are decorative only (aria-hidden in the markup). */
+/* A slow, clearly visible animated backdrop: three large, saturated
+   orbs drift across a softly tinted base, plus a faint dot grid.
+   The orbs are big and bright enough to read on a phone, where only
+   the margins around the cards show the background. Content always
+   sits on solid cards above it, so readability never depends on the
+   animation. The orbs are decorative only (aria-hidden in the markup). */
 body {
   background:
-    radial-gradient(1200px 500px at 85% -10%, rgba(13, 148, 136, 0.10), transparent 60%),
-    radial-gradient(900px 480px at -10% 30%, rgba(59, 130, 246, 0.08), transparent 60%),
-    var(--bg);
+    radial-gradient(1200px 500px at 85% -10%, rgba(13, 148, 136, 0.22), transparent 60%),
+    radial-gradient(900px 480px at -10% 30%, rgba(59, 130, 246, 0.18), transparent 60%),
+    linear-gradient(180deg, #e6f7f3 0%, #f8fafc 35%, #eef2ff 100%);
 }
 .bg-live {
   position: fixed;
@@ -444,31 +446,31 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(15, 23, 42, 0.055) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px);
   background-size: 26px 26px;
 }
 .bg-live .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(70px);
-  opacity: 0.55;
+  filter: blur(60px);
+  opacity: 0.9;
 }
 .bg-live .orb-1 {
-  width: 420px; height: 420px;
-  left: -120px; top: 8%;
-  background: radial-gradient(circle, rgba(45, 212, 191, 0.55), transparent 65%);
+  width: 560px; height: 560px;
+  left: -60px; top: 2%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.85), transparent 65%);
   animation: orb-drift-1 36s ease-in-out infinite alternate;
 }
 .bg-live .orb-2 {
-  width: 380px; height: 380px;
-  right: -100px; top: 38%;
-  background: radial-gradient(circle, rgba(96, 165, 250, 0.45), transparent 65%);
+  width: 500px; height: 500px;
+  right: -40px; top: 30%;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.8), transparent 65%);
   animation: orb-drift-2 44s ease-in-out infinite alternate;
 }
 .bg-live .orb-3 {
-  width: 300px; height: 300px;
-  left: 30%; bottom: -120px;
-  background: radial-gradient(circle, rgba(167, 139, 250, 0.35), transparent 65%);
+  width: 440px; height: 440px;
+  left: 25%; bottom: -60px;
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.75), transparent 65%);
   animation: orb-drift-3 52s ease-in-out infinite alternate;
 }
 @keyframes orb-drift-1 {
