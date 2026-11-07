@@ -142,6 +142,18 @@ test('no page hardcodes a wallet address', () => {
   }
 });
 
+test('prover flow: sampling window takes any number of days', () => {
+  // The sampling window used to be a dropdown capped at 7 days. It
+  // is now a free days input with no limit: type any number of days,
+  // 0 or blank means no sampling. The sampling itself works in
+  // hours, so the input converts days to hours.
+  assert.ok(!proveHtml.includes('<select id="sampleWindow">'), 'prove.html must not cap sampling with a dropdown');
+  assert.ok(proveHtml.includes('id="sampleWindow" type="text"'), 'prove.html must let the user type any number of days');
+  assert.ok(appJs.includes('function sampleWindowHours'), 'app.js must convert the days input to hours');
+  assert.ok(appJs.includes('days * 24'), 'app.js must convert days to hours for sampling');
+  assert.ok(!appJs.includes('168'), 'app.js must not cap the sampling window at 7 days');
+});
+
 test('prover flow: a minimum without a window defaults to 30 days', () => {
   // The window fields show 30 as a placeholder, not a value. A user
   // who fills in a minimum and leaves the window blank used to get
@@ -169,7 +181,7 @@ test('prover flow: signing the challenge fetches the snapshot automatically', ()
   // policy asks for them but the snapshot has none, Evaluate turns
   // sampling on (24 hours) and re-fetches instead of failing with
   // the claims-engine error about missing balanceSamples.
-  assert.ok(appJs.includes("$('sampleWindow').value = '24'"), 'evaluate must turn sampling on when the policy needs samples');
+  assert.ok(appJs.includes("$('sampleWindow').value = '1'"), 'evaluate must turn sampling on when the policy needs samples');
   assert.ok(appJs.includes('Those claims need balance history sampling'), 'evaluate must say why it is re-fetching');
 });
 

@@ -511,6 +511,14 @@ function parseLinkTxHashes(count) {
   return { hashes: lines.map((h) => (h === '' ? null : h)), ignored };
 }
 
+// The sampling window input is in days (0 or blank = no sampling).
+// The sampling itself works in hours, so convert here. There is no
+// limit on the days: type any number.
+function sampleWindowHours() {
+  const days = Number($('sampleWindow').value);
+  return days > 0 ? days * 24 : 0;
+}
+
 async function fetchSnapshot() {
   const out = $('snapshotOut');
   try {
@@ -532,7 +540,7 @@ async function fetchSnapshot() {
     }
     const linkedAddresses = parseLinkedAddresses();
     const { hashes: linkHashes, ignored: ignoredLinkHashes } = parseLinkTxHashes(linkedAddresses.length);
-    const sampleHours = Number($('sampleWindow').value);
+    const sampleHours = sampleWindowHours();
     const sampleOpts = sampleHours > 0 ? { balanceSamples: { windowHours: sampleHours, samples: 4 } } : {};
     out.innerHTML = '<p class="muted">Fetching account state for <span class="mono">' + esc(address) + '</span> and verifying ' + entries.length + ' transaction(s)…</p>';
     const snapshot = await fetchAccountSnapshot(address, entries, sampleOpts);
@@ -622,7 +630,7 @@ function renderSnapshot(snapshot, address, entriesCount, sampleHours) {
         : '')
     : '';
   const sampleLine = snapshot.balanceSamples
-    ? '<p>Balance samples: ' + snapshot.balanceSamples.length + ' readings over ' + sampleHours + 'h (lowest ' + esc(yoctoToNear(snapshot.balanceSamples.reduce((m, s) => (BigInt(s.amount) < BigInt(m) ? s.amount : m), snapshot.balanceSamples[0].amount))) + ' NEAR).</p>'
+    ? '<p>Balance samples: ' + snapshot.balanceSamples.length + ' readings over ' + (sampleHours % 24 === 0 ? (sampleHours / 24) + ' day' + (sampleHours / 24 === 1 ? '' : 's') : sampleHours + 'h') + ' (lowest ' + esc(yoctoToNear(snapshot.balanceSamples.reduce((m, s) => (BigInt(s.amount) < BigInt(m) ? s.amount : m), snapshot.balanceSamples[0].amount))) + ' NEAR).</p>'
     : '';
   out.innerHTML =
     '<p class="ok">Snapshot fetched for <span class="mono">' + esc(address) + '</span> at block ' + snapshot.blockHeight + '.</p>' +
@@ -680,7 +688,7 @@ async function signLink(index) {
     entry.linkSignature = linkSignature;
     invalidateReport('a link was signed.');
     saveState();
-    renderSnapshot(state.snapshot, state.previewAddress, state.suppliedTxCount ?? state.snapshot.txs.length, Number($('sampleWindow').value));
+    renderSnapshot(state.snapshot, state.previewAddress, state.suppliedTxCount ?? state.snapshot.txs.length, sampleWindowHours());
     updateWalletUI();
   } catch (err) {
     setOut('<span class="error">Link signing failed: ' + esc(err.message) + '</span>');
@@ -831,7 +839,7 @@ async function evaluate() {
     if (Object.keys(policy).length === 0) throw new Error('Set at least one policy field.');
     // Sustained and time-weighted claims need balance samples. If the
     // policy asks for them but the snapshot has none (sampling was
-    // off), turn sampling on (24 hours) and re-fetch instead of
+    // off), turn sampling on (1 day) and re-fetch instead of
     // failing: the user filled those fields in, so they want those
     // claims, and the error about missing samples tells them nothing
     // useful about how to get them.
@@ -842,8 +850,8 @@ async function evaluate() {
       needsSamples && wallets.some((w) => !Array.isArray(w.balanceSamples) || w.balanceSamples.length === 0);
     if (missingSamples) {
       $('claimsOut').innerHTML =
-        '<p class="muted">Those claims need balance history sampling, turning it on (24 hours) and re-fetching the snapshot…</p>';
-      $('sampleWindow').value = '24';
+        '<p class="muted">Those claims need balance history sampling, turning it on (1 day) and re-fetching the snapshot…</p>';
+      $('sampleWindow').value = '1';
       const snapshotError = await fetchSnapshot();
       if (!state.snapshot) {
         throw new Error(snapshotError ? `Snapshot failed: ${snapshotError}` : 'Fetch a snapshot first.');

@@ -87,17 +87,13 @@
     <label>Link transfer hash per linked wallet (one per line, same order, blank = link by signature instead)
     <textarea id="linkedTxHashes" placeholder="hash of a transfer from the linked wallet to the primary address"></textarea>
     </label>
-    <label>Balance history sampling
-    <select id="sampleWindow">
-      <option value="0" selected>No sampling, score ignores sustained balance</option>
-      <option value="6">Sample the last 6 hours (4 readings)</option>
-      <option value="24">Sample the last 24 hours (4 readings)</option>
-      <option value="168">Sample the last 7 days (4 readings)</option>
-    </select>
+    <label>Balance history sampling (days, 0 or blank = no sampling)
+    <input id="sampleWindow" type="text" inputmode="numeric" placeholder="0">
     </label>
     <p class="muted">Sampling reads the balance at past block heights, so the
     report can prove a balance was HELD, not just deposited an hour
-    ago. The account must be older than the window you pick.</p>
+    ago. Type any number of days, there is no limit. The account must
+    be older than the window you pick.</p>
     <p>
       <button id="fetchSnapshotBtn" type="button">Fetch snapshot</button>
     </p>
