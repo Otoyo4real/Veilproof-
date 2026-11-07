@@ -523,19 +523,24 @@ async function fetchSnapshot() {
   const out = $('snapshotOut');
   try {
     const address = readPreviewAddress();
-    const entries = parseTxLines();
+    const pasted = parseTxLines();
     // Auto-detect the recent transaction history from the indexer, so
     // the user never has to paste hashes. The signature in step 1
     // proves ownership, but it produces no transaction hash, so there
     // is nothing to paste from it. Manually pasted hashes are merged
     // in (dedup by hash) for txs the indexer may not list, e.g. older
     // ones or incoming transfers from other accounts.
-    const autoEntries = await fetchRecentTxHashes(address, 25);
+    // The auto-detected entries go FIRST because they are newest
+    // first: the snapshot only ever verifies the 100 most recent
+    // transactions, so the newest must win the cap, not whichever
+    // the user happened to paste first.
+    const autoEntries = await fetchRecentTxHashes(address, 100);
+    const entries = [...autoEntries];
     const seenHashes = new Set(entries.map((e) => e.hash));
-    for (const a of autoEntries) {
-      if (!seenHashes.has(a.hash)) {
-        entries.push(a);
-        seenHashes.add(a.hash);
+    for (const p of pasted) {
+      if (!seenHashes.has(p.hash)) {
+        entries.push(p);
+        seenHashes.add(p.hash);
       }
     }
     const linkedAddresses = parseLinkedAddresses();
@@ -568,14 +573,19 @@ async function fetchSnapshot() {
       sampleHours > 0 && snapshot.balanceSamples
         ? { balanceSamples: { windowHours: sampleHours, samples: 4, heights: snapshot.balanceSamples.map((s) => s.blockHeight) } }
         : sampleOpts;
-    for (let i = 0; i < linkedAddresses.length; i += 1) {
-      const linkedAddress = linkedAddresses[i];
+    // Linked wallets are fetched in parallel, not one after another:
+    // each is a full snapshot, and two sequential ones double the
+    // wait for no reason.
+    const linkedResults = await Promise.all(linkedAddresses.map(async (linkedAddress, i) => {
       const linkTxHash = linkHashes[i];
       const walletEntries = entries.filter((e) => e.senderId === linkedAddress);
       if (linkTxHash && !walletEntries.some((e) => e.hash === linkTxHash)) {
         walletEntries.push({ hash: linkTxHash, senderId: linkedAddress });
       }
       const linkedSnapshot = await fetchAccountSnapshot(linkedAddress, walletEntries, linkedSampleOpts);
+      return { linkedAddress, linkTxHash, linkedSnapshot };
+    }));
+    for (const { linkedAddress, linkTxHash, linkedSnapshot } of linkedResults) {
       if (linkTxHash) {
         const linkTx = linkedSnapshot.txs.find((t) => t.hash === linkTxHash);
         if (!linkTx || linkTx.senderId !== linkedAddress || linkTx.receiverId !== address || linkTx.status !== 'Success') {
@@ -637,7 +647,9 @@ function renderSnapshot(snapshot, address, entriesCount, sampleHours) {
     '<p>Balance: <span class="mono">' + esc(yoctoToNear(snapshot.account.amount)) + ' NEAR</span> ' +
     '(staked: <span class="mono">' + esc(yoctoToNear(snapshot.account.locked)) + ' NEAR</span>)</p>' +
     '<p>Verified transactions: ' + snapshot.txs.length + ' of ' + entriesCount + ' supplied ' +
-    '(unverifiable hashes are skipped).</p>' +
+    '(unverifiable hashes are skipped' +
+    (snapshot.cappedTxCount > 0 ? '; only the 100 most recent are verified, ' + snapshot.cappedTxCount + ' older one' + (snapshot.cappedTxCount === 1 ? '' : 's') + ' capped' : '') +
+    ').</p>' +
     linkedLine + sampleLine +
     '<p>Data hash: <span class="mono">' + esc(snapshot.dataHash) + '</span></p>';
   out.querySelectorAll('[data-sign-link]').forEach((btn) => {

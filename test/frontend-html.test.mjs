@@ -142,6 +142,24 @@ test('no page hardcodes a wallet address', () => {
   }
 });
 
+test('snapshot: a wallet with thousands of transactions still fetches in seconds', () => {
+  // Verifying every transaction would take minutes for a busy wallet,
+  // no matter how parallel it is. The snapshot verifies at most the
+  // 100 most recent (the claims and the score only ever look at recent
+  // transactions inside the policy windows), in parallel batches, and
+  // caches block lookups so transactions in the same block do not each
+  // pay for a block call. The auto-detect returns up to 100, newest
+  // first, and the UI says how many older ones were capped.
+  const onchainJs = readFileSync(new URL('../public/js/onchain.js', import.meta.url), 'utf8');
+  assert.ok(onchainJs.includes('cappedTxCount'), 'onchain.js must track how many transactions were capped');
+  assert.ok(onchainJs.includes('slice(0, 100)'), 'onchain.js must verify at most the 100 most recent transactions');
+  assert.ok(onchainJs.includes('i += 12'), 'onchain.js must verify transactions in parallel batches of 12');
+  assert.ok(onchainJs.includes('blockCache'), 'onchain.js must cache block lookups by block hash');
+  assert.ok(onchainJs.includes('limit = 100'), 'fetchRecentTxHashes must return up to 100 recent transactions');
+  assert.ok(appJs.includes('fetchRecentTxHashes(address, 100)'), 'app.js must ask the indexer for up to 100');
+  assert.ok(appJs.includes('cappedTxCount'), 'app.js must tell the user how many transactions were capped');
+});
+
 test('prover flow: sampling window takes any number of days', () => {
   // The sampling window used to be a dropdown capped at 7 days. It
   // is now a free days input with no limit: type any number of days,

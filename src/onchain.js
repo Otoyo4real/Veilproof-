@@ -183,13 +183,27 @@ function normalizeTx(result, txHash) {
   };
 }
 
+// Immutable block lookup cache, keyed by block hash. Block data never
+// changes: a block hash always maps to the same height and timestamp.
+// See blockHeightAndTimestamp.
+const blockCache = new Map();
+
 async function blockHeightAndTimestamp(blockHash) {
   if (!blockHash) throw new Error('verifyTx: tx outcome carries no block hash');
-  const block = await rpcCall('block', { block_id: blockHash });
-  return {
-    blockHeight: Number(block.header.height),
-    blockTimestampNs: String(block.header.timestamp_nanosec),
-  };
+  // Cache it so transactions in the same block do not each pay for a
+  // block call. A wallet with many transactions in a short window
+  // reuses a handful of blocks, so this cuts the RPC calls roughly in
+  // half for a busy wallet.
+  let cached = blockCache.get(blockHash);
+  if (!cached) {
+    const block = await rpcCall('block', { block_id: blockHash });
+    cached = {
+      blockHeight: Number(block.header.height),
+      blockTimestampNs: String(block.header.timestamp_nanosec),
+    };
+    blockCache.set(blockHash, cached);
+  }
+  return cached;
 }
 
 // Verify one transaction by hash (base58) and sender.
@@ -366,9 +380,11 @@ export async function sampleBalanceHistoryDetailed(accountId, { windowHours, sam
     const current = await getAccount(accountId);
     sampleHeights = computeSampleHeights(current.blockHeight, { windowHours, samples });
   }
-  const out = [];
-  const missingHeights = [];
-  for (const height of sampleHeights) {
+  // Read the sample heights in parallel, not one after another: the
+  // readings are independent, and four sequential RPC calls on a
+  // phone connection is seconds of waiting for no reason. Promise.all
+  // keeps the results in height order.
+  const results = await Promise.all(sampleHeights.map(async (height) => {
     let result;
     try {
       result = await rpcCall('query', {
@@ -380,8 +396,7 @@ export async function sampleBalanceHistoryDetailed(accountId, { windowHours, sam
       // Unservable height (account younger than the window, pruned
       // height, node hiccup): record it and keep the readings that
       // did come back. The sampling record carries the gap.
-      missingHeights.push(height);
-      continue;
+      return { missing: height };
     }
     const sample = { blockHeight: height, amount: String(result.amount) };
     try {
@@ -391,7 +406,13 @@ export async function sampleBalanceHistoryDetailed(accountId, { windowHours, sam
       // Header unavailable: the balance reading stands, and
       // describeSampling estimates this timestamp instead.
     }
-    out.push(sample);
+    return { sample };
+  }));
+  const out = [];
+  const missingHeights = [];
+  for (const r of results) {
+    if (r.sample) out.push(r.sample);
+    else missingHeights.push(r.missing);
   }
   if (out.length === 0) {
     throw new Error(
@@ -426,29 +447,51 @@ export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) 
   const seen = new Set();
   const txs = [];
   let skippedTxCount = 0;
+  // Verify the transactions in parallel, in small batches so a public
+  // RPC is not hammered with 25 simultaneous requests. Sequential
+  // verification is why a snapshot took so long: each verifyTx is one
+  // or two RPC calls, and 16 of them one after another on a phone
+  // connection is tens of seconds. In batches of 12 the whole set
+  // takes roughly the slowest single call, a few seconds.
+  // A wallet can hold thousands of transactions, and verifying every
+  // one would take minutes no matter how parallel it is. The claims
+  // and the score only ever look at recent transactions inside the
+  // policy windows, so verify at most the 100 most recent (the caller
+  // passes the newest first). Anything beyond that is capped, never
+  // verified, and the snapshot says so.
+  const unique = [];
   for (const entry of txHashes) {
     const hash = typeof entry === 'string' ? entry : entry?.hash;
     const senderId = typeof entry === 'string' ? accountId : entry?.senderId ?? accountId;
     if (typeof hash !== 'string' || seen.has(hash)) continue;
     seen.add(hash);
-    // One tx failing to verify (e.g. a flaky phone connection dropping
-    // a single RPC call) must not kill the whole snapshot: skip it and
-    // keep the txs that did verify. A skipped tx is simply absent, so
-    // the snapshot can only undercount activity, never invent it.
-    // Other errors (malformed input, RPC-level failures) still throw.
-    try {
-      const verified = await verifyTx(hash, senderId);
-      if (verified) txs.push(verified);
-    } catch (err) {
-      if (isNetworkError(err)) {
-        skippedTxCount += 1;
-        continue;
+    unique.push({ hash, senderId });
+  }
+  const cappedTxCount = Math.max(0, unique.length - 100);
+  const toVerify = unique.slice(0, 100);
+  for (let i = 0; i < toVerify.length; i += 12) {
+    const batch = toVerify.slice(i, i + 12);
+    const results = await Promise.all(batch.map(async ({ hash, senderId }) => {
+      // One tx failing to verify (e.g. a flaky phone connection dropping
+      // a single RPC call) must not kill the whole snapshot: skip it and
+      // keep the txs that did verify. A skipped tx is simply absent, so
+      // the snapshot can only undercount activity, never invent it.
+      // Other errors (malformed input, RPC-level failures) still throw.
+      try {
+        const verified = await verifyTx(hash, senderId);
+        return { verified };
+      } catch (err) {
+        if (isNetworkError(err)) return { skipped: true };
+        throw err;
       }
-      throw err;
+    }));
+    for (const r of results) {
+      if (r.verified) txs.push(r.verified);
+      else if (r.skipped) skippedTxCount += 1;
     }
   }
   txs.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0));
-  const snapshot = { account, txs, blockHeight: account.blockHeight, skippedTxCount };
+  const snapshot = { account, txs, blockHeight: account.blockHeight, skippedTxCount, cappedTxCount };
   if (opts.balanceSamples) {
     const detailed = await sampleBalanceHistoryDetailed(accountId, opts.balanceSamples);
     snapshot.balanceSamples = detailed.samples;
@@ -477,9 +520,11 @@ export const NEARBLOCKS_TESTNET_API = 'https://api-testnet.nearblocks.io/v3';
 // Fetch the account's most recent transactions from the NEAR Blocks
 // indexer and return them as { hash, senderId } entries, newest first.
 // Returns [] on any indexer error, so the caller falls back to the
-// manually pasted hashes. Limit is capped at 25.
-export async function fetchRecentTxHashes(accountId, limit = 25) {
-  const n = Math.max(1, Math.min(25, Math.floor(limit) || 25));
+// manually pasted hashes. Limit is capped at 100: the snapshot only
+// ever verifies the 100 most recent transactions, so asking the
+// indexer for more would be wasted work.
+export async function fetchRecentTxHashes(accountId, limit = 100) {
+  const n = Math.max(1, Math.min(100, Math.floor(limit) || 100));
   const url = `${NEARBLOCKS_TESTNET_API}/accounts/${encodeURIComponent(accountId)}/txns?limit=${n}`;
   try {
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
