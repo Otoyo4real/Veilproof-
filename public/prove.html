@@ -53,12 +53,15 @@
     <input id="previewAddress" type="text" placeholder="e.g. alice.testnet" autocomplete="off" spellcheck="false">
     </label>
     <p class="muted">You can paste a named account (.near or .testnet) or a 64 character hex wallet address. Previewing is read only and needs no wallet. You only connect a wallet later, in step 2, to prove you own the address.</p>
-    <label>Transaction hashes (base58, one per line)
+    <label>Transaction hashes (base58, one per line, optional)
     <textarea id="txHashes" placeholder="EQeaPK7R7nzT14a6e5kc685Yug45LDMxP4K7YhTxYn9g,sender.testnet"></textarea>
     </label>
-    <p class="muted">A bare hash is assumed to be yours; use
-    <span class="mono">hash,senderId</span> for incoming transfers sent by
-    someone else. Hashes that cannot be verified onchain are skipped.</p>
+    <p class="muted">Optional. Your recent transactions are detected
+    automatically when the snapshot is fetched, so you do not need to
+    paste anything. Use this box only for older transactions, or for
+    incoming transfers sent by someone else. A bare hash is assumed to
+    be yours; use <span class="mono">hash,senderId</span> for incoming
+    transfers. Hashes that cannot be verified onchain are skipped.</p>
     <label>Additional wallets to link (one address per line, optional)
     <textarea id="linkedAddresses" placeholder="e.g. second-wallet.testnet"></textarea>
     </label>

@@ -33,7 +33,7 @@ import { computeScore } from './js/score.js';
 import { buildReport, reportHash, evidenceHash, policyHash, newProverSalt, commitAddress } from './js/report.js';
 import { buildDisclosurePackage, buildMultiDisclosurePackage, assertPublicReportClean } from './js/disclosure.js';
 import { encryptDisclosurePackage, verifierKeyFingerprint } from './js/crypto-box.js';
-import { fetchAccountSnapshot, dataHashForSnapshots } from './js/onchain.js';
+import { fetchAccountSnapshot, dataHashForSnapshots, fetchRecentTxHashes } from './js/onchain.js';
 import { describeSampling } from './js/sampling.js';
 import { sha256Hex, randomHex } from './js/crypto.js';
 import { buildLinkMessage, verifyLinkSignature } from './js/nep413.js';
@@ -246,15 +246,15 @@ function updateWalletUI() {
       (state.previewAddress ? ' <span class="mono">' + esc(state.previewAddress) + '</span>' : '') +
       '. Switch wallets to sign the challenge for the previewed address, or preview a different address.</p>';
   }
-  $('evaluateBtn').disabled = !state.snapshot;
-  // The button is greyed out until step 1 fetches the snapshot, and a
-  // greyed out button with no reason is a dead end. Say plainly what to
-  // do first, so nobody has to guess why it does nothing.
+  // Evaluate fetches the snapshot itself when there is none yet, so the
+  // button is never greyed out for lack of one. It only needs an
+  // address to preview and at least one policy field set.
+  $('evaluateBtn').disabled = false;
   const evaluateHint = $('evaluateHint');
   if (evaluateHint) {
     evaluateHint.textContent = state.snapshot
       ? ''
-      : 'Fetch the snapshot in step 1 first. Paste the wallet address, then tap Fetch snapshot, and this button will work.';
+      : 'No snapshot yet. Tap Evaluate claims and it will be fetched for you, with the recent transactions detected automatically. No hashes to paste.';
   }
   $('aiBtn').disabled = !state.evaluation;
   $('buildReportBtn').disabled = !state.evaluation;
@@ -472,6 +472,20 @@ async function fetchSnapshot() {
   try {
     const address = readPreviewAddress();
     const entries = parseTxLines();
+    // Auto-detect the recent transaction history from the indexer, so
+    // the user never has to paste hashes. The signature in step 2
+    // proves ownership, but it produces no transaction hash, so there
+    // is nothing to paste from it. Manually pasted hashes are merged
+    // in (dedup by hash) for txs the indexer may not list, e.g. older
+    // ones or incoming transfers from other accounts.
+    const autoEntries = await fetchRecentTxHashes(address, 25);
+    const seenHashes = new Set(entries.map((e) => e.hash));
+    for (const a of autoEntries) {
+      if (!seenHashes.has(a.hash)) {
+        entries.push(a);
+        seenHashes.add(a.hash);
+      }
+    }
     const linkedAddresses = parseLinkedAddresses();
     const linkHashes = parseLinkTxHashes(linkedAddresses.length);
     const sampleHours = Number($('sampleWindow').value);
@@ -723,9 +737,17 @@ function renderClaims() {
   updateWalletUI();
 }
 
-function evaluate() {
+async function evaluate() {
   try {
-    if (!state.snapshot) throw new Error('Fetch a snapshot first.');
+    if (!state.snapshot) {
+      // No snapshot yet, e.g. the user signed the challenge first and
+      // came straight here. Fetch it now, with the recent transactions
+      // auto-detected, then evaluate. There is no step that must be
+      // done first beyond having an address to preview.
+      $('claimsOut').innerHTML = '<p class="muted">No snapshot yet, fetching it first…</p>';
+      await fetchSnapshot();
+      if (!state.snapshot) throw new Error('Fetch a snapshot first.');
+    }
     const policy = readPolicy();
     if (Object.keys(policy).length === 0) throw new Error('Set at least one policy field.');
     const nowNs = (BigInt(Date.now()) * 1000000n).toString();

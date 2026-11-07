@@ -431,3 +431,36 @@ export async function fetchAccountSnapshot(accountId, txHashes = [], opts = {}) 
   snapshot.dataHash = dataHashForSnapshots([snapshot]);
   return snapshot;
 }
+
+// NEAR Blocks indexer (v3 API) base for testnet. Used only to discover
+// the account's recent transaction hashes, so the user never has to
+// paste them. The hashes are still verified one by one against the
+// NEAR RPC (verifyTx), so the indexer is a discovery aid, not a trust
+// source: a hash it returns that the RPC cannot verify is skipped.
+export const NEARBLOCKS_TESTNET_API = 'https://api-testnet.nearblocks.io/v3';
+
+// Fetch the account's most recent transactions from the NEAR Blocks
+// indexer and return them as { hash, senderId } entries, newest first.
+// Returns [] on any indexer error, so the caller falls back to the
+// manually pasted hashes. Limit is capped at 25.
+export async function fetchRecentTxHashes(accountId, limit = 25) {
+  const n = Math.max(1, Math.min(25, Math.floor(limit) || 25));
+  const url = `${NEARBLOCKS_TESTNET_API}/accounts/${encodeURIComponent(accountId)}/txns?limit=${n}`;
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const data = Array.isArray(json?.data) ? json.data : [];
+    const out = [];
+    for (const t of data) {
+      const hash = t?.transaction_hash;
+      const senderId = t?.signer_account_id;
+      if (typeof hash === 'string' && hash.length >= 43 && typeof senderId === 'string' && senderId) {
+        out.push({ hash, senderId });
+      }
+    }
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
